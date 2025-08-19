@@ -27,14 +27,12 @@ jobs:
       - name: 提取插件版本（从config.json）
         id: version
         run: |
-          # 修正路径：指向实际的config.json位置
-          echo "VERSION=$(jq -r '.version' ha-addon-163-gateway/ha_to_163/config.json)" >> $GITHUB_OUTPUT
-
+         echo "VERSION=$(jq -r '.version' ha-addon-163-gateway/ha_to_163/config.json)" >> $GITHUB_OUTPUT
       - name: 构建并推送多架构镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./ha-addon-163-gateway/ha_to_163  # 修正构建上下文（包含ha_to_163子目录）
-          file: ./ha-addon-163-gateway/ha_to_163/Dockerfile  # 修正Dockerfile路径
+          context: ./ha-addon-163-gateway/ha_to_163
+          file: ./ha-addon-163-gateway/ha_to_163/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
