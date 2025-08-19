@@ -50,3 +50,5 @@ jobs:
             ghcr.io/dmxmj/ha-addon-163-gateway/ha-to-163-gateway:latest
             ghcr.io/dmxmj/ha-addon-163-gateway/ha-to-163-gateway:${{ github.sha }}
           provenance: mode=max
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
