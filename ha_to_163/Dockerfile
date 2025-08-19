@@ -1,6 +1,3 @@
-FROM alpine:3.18
-
-# 基于Home Assistant官方基础镜像（通过BUILD_FROM参数传入，自动匹配架构）
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
