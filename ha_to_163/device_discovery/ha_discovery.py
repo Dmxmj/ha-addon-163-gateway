@@ -25,6 +25,10 @@ PROPERTY_MAPPING = {
     "hum_p": "hum",
     "battery_p": "batt",
     "batt_p": "batt",
+    "smoke_concentration": "smoke", 
+    "smoke": "smoke",
+    "smoke_level": "smoke",
+    "smoke_density": "smoke",
 
     # 电气设备映射
     "state": "state",
