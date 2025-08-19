@@ -9,10 +9,10 @@
         "aarch64",
         "i386"
     ],
-    "url": "https://github.com/Dmxmj/ha-addon-163-gateway/tree/main",
+    "url": "https://github.com/Dmxmj/ha-addon-163-gateway",
     "startup": "application",
     "boot": "auto",
-    "image": "ghcr.io/dmxmj/ha-addon-163-gateway/{arch}",
+    "image": "ghcr.io/dmxmj/ha-addon-163-gateway",
     "options": {
         "ha_url": "http://homeassistant:8123",
         "ha_token": "",
