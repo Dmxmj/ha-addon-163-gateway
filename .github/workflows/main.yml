@@ -5,13 +5,13 @@ on:
     branches:
       - main
     tags:
-      - 'v*' # 比如 v1.0.0
+      - 'v*'  # 例如 v1.0.0
   pull_request: {}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  ADDON_DIR: ha-addon-163-gateway/ha_to_163
+  ADDON_DIR: ha-addon-163-gateway/ha_to_163_gateway  # ✅ 修正路径
 
 jobs:
   build:
@@ -33,7 +33,7 @@ jobs:
             echo "version=latest" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up QEMU
+      - name: Set up QEMU for multi-arch
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
@@ -48,7 +48,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get metadata (tags, labels)
+      - name: Generate Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -60,16 +60,10 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ${{ env.ADDON_DIR }}
-          file: ${{ env.ADDON_DIR }}/Dockerfile
+          context: ${{ env.ADDON_DIR }}                     # ✅ 使用正确路径
+          file: ${{ env.ADDON_DIR }}/Dockerfile             # ✅ 使用正确路径
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          attest: type=provenance,mode=max
-
-      - name: Print image info
-        run: |
-          echo "✅ Image built and pushed:"
-          echo "   ${{ steps.meta.outputs.images }}"
-          echo "   Tags: ${{ steps.meta.outputs.tags }}"
+          provenance
