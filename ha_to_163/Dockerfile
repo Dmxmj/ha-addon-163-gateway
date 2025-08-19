@@ -1,4 +1,3 @@
-FROM alpine:3.18
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
