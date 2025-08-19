@@ -1,3 +1,4 @@
+FROM alpine:3.18
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
@@ -16,13 +17,18 @@ LABEL \
 
 # 安装Python依赖
 RUN \
-    apk add --no-cache \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
         python3 \
-        py3-pip \
-    && pip3 install --no-cache-dir \
+        python3-pip \
+    && \
+    pip3 install --no-cache-dir \
         paho-mqtt==1.6.1 \
         requests==2.31.0 \
-        ntplib==0.4.0
+        ntplib==0.4.0 \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # 复制Add-on文件到镜像中
 COPY . /app/
