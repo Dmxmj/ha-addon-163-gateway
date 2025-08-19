@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'ha_to_163/**'  # 直接指向根目录下的ha_to_163
-      - '.github/workflows/main.yml'
+      - 'ha-addon-163-gatewa/**'  # 保持实际目录名（即使拼写不完整，以实际存在的为准）
+      - '.github/workflows/build.yml'  # 注意工作流文件名是build.yml
 
 jobs:
   build:
@@ -13,13 +13,6 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
-
-      - name: 调试路径和文件
-        run: |
-          echo "当前根目录文件："
-          ls -l
-          echo "ha_to_163目录内容："
-          ls -l ha_to_163  # 检查核心目录是否存在
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,20 +27,27 @@ jobs:
       - name: 提取插件版本（从config.json）
         id: version
         run: |
-          # 直接从根目录下的ha_to_163读取config.json
-          echo "VERSION=$(jq -r '.version' ha_to_163/config.json)" >> $GITHUB_OUTPUT
+          # 修正config.json路径（根据实际目录结构，当前在ha-addon-163-gatewa/ha_to_163下）
+          echo "VERSION=$(jq -r '.version' ha-addon-163-gatewa/ha_to_163/config.json)" >> $GITHUB_OUTPUT
 
       - name: 构建并推送多架构镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./ha_to_163  # 构建上下文为根目录下的ha_to_163
-          file: ./ha_to_163/Dockerfile  # Dockerfile路径
-          platforms: linux/amd64,linux/arm64
+          context: ./ha-addon-163-gatewa/ha_to_163  # 修正为实际Dockerfile所在目录
+          file: ./ha-addon-163-gatewa/ha_to_163/Dockerfile  # 明确Dockerfile路径
+          platforms: linux/amd64,linux/arm64  # 指定要构建的架构
           push: true
+          # 标签格式修正：统一镜像名，通过架构区分标签
           tags: |
-            ghcr.io/dmxmj/ha-to-163-gateway/amd64:${{ steps.version.outputs.VERSION }}
-            ghcr.io/dmxmj/ha-to-163-gateway/aarch64:${{ steps.version.outputs.VERSION }}
+            ghcr.io/dmxmj/ha-to-163-gateway:${{ steps.version.outputs.VERSION }}-amd64
+            ghcr.io/dmxmj/ha-to-163-gateway:${{ steps.version.outputs.VERSION }}-aarch64
+            ghcr.io/dmxmj/ha-to-163-gateway:latest-amd64
+            ghcr.io/dmxmj/ha-to-163-gateway:latest-aarch64
+          # 关键修正：使用BUILDX_PLATFORM变量动态替换架构
           build-args: |
-            BUILD_FROM=homeassistant/{arch}-base:latest
+            BUILD_FROM=homeassistant/${{ matrix.platform }}-base:latest
             BUILD_VERSION=${{ steps.version.outputs.VERSION }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
+    strategy:
+      matrix:
+        platform: [amd64, arm64]  # 通过矩阵构建分别处理不同架构
