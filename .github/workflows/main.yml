@@ -1,11 +1,10 @@
-
 name: Build and Push Docker Image
 
 on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,34 +14,24 @@ jobs:
       contents: read
 
     steps:
-      # 1. 检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. 调试：查看目录结构（关键！确认路径）
-      - name: Debug: List directory structure
+      - name: Debug
         run: |
-          echo "📁 Root directory:"
+          echo "Root:"
           ls -la
-          echo ""
-          echo "📁 Contents of ha-addon-163-gateway/:"
-          ls -la ha-addon-163-gateway/ || echo "Directory not found!"
-          echo ""
-          echo "🔍 Checking for ha_to_163 or ha-to-163..."
-          test -d "ha-addon-163-gateway/ha_to_163" && echo "✅ Found: ha_to_163" || echo "❌ Not found: ha_to_163"
-          test -d "ha-addon-163-gateway/ha-to-163" && echo "✅ Found: ha-to-163" || echo "❌ Not found: ha-to-163"
+          echo "Inside ha-addon-163-gateway:"
+          ls -la ha-addon-163-gateway/ || echo "Not found"
 
-      # 3. 设置 QEMU，支持多架构构建
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
 
-      # 4. 设置 Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 5. 登录到 GitHub Container Registry (GHCR)
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -50,8 +39,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 6. 构建并推送镜像
-      - name: Build and push Docker image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: ha-addon-163-gateway/ha_to_163
