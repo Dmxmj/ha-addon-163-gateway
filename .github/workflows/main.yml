@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'ha-addon-163-gateway/**'  # 修正目录名拼写（gatewa → gateway）
-      - '.github/workflows/main.yml'  # 修正工作流文件名
+      - 'ha_to_163/**'  # 直接指向根目录下的ha_to_163
+      - '.github/workflows/main.yml'
 
 jobs:
   build:
@@ -13,6 +13,13 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
+
+      - name: 调试路径和文件
+        run: |
+          echo "当前根目录文件："
+          ls -l
+          echo "ha_to_163目录内容："
+          ls -l ha_to_163  # 检查核心目录是否存在
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -27,21 +34,20 @@ jobs:
       - name: 提取插件版本（从config.json）
         id: version
         run: |
-          # 修正路径：指向实际的config.json位置
-          echo "VERSION=$(jq -r '.version' ha-addon-163-gateway/ha_to_163/config.json)" >> $GITHUB_OUTPUT
+          # 直接从根目录下的ha_to_163读取config.json
+          echo "VERSION=$(jq -r '.version' ha_to_163/config.json)" >> $GITHUB_OUTPUT
 
       - name: 构建并推送多架构镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./ha-addon-163-gateway/ha_to_163  # 构建上下文路径
-          file: ./ha-addon-163-gateway/ha_to_163/Dockerfile  # Dockerfile路径
+          context: ./ha_to_163  # 构建上下文为根目录下的ha_to_163
+          file: ./ha_to_163/Dockerfile  # Dockerfile路径
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/dmxmj/ha-to-163-gateway/amd64:${{ steps.version.outputs.VERSION }}
             ghcr.io/dmxmj/ha-to-163-gateway/aarch64:${{ steps.version.outputs.VERSION }}
           build-args: |
-            # 关键修正：明确指定基础镜像，使用{arch}变量匹配多架构
             BUILD_FROM=homeassistant/{arch}-base:latest
             BUILD_VERSION=${{ steps.version.outputs.VERSION }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
