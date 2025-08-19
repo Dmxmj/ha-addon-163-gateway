@@ -18,10 +18,8 @@ RUN apk add --no-cache \
 
 # 使用阿里云源安装依赖（HTTP + trusted-host）
 RUN python3 -m pip install --no-cache-dir \
-    --index-url http://mirrors.aliyun.com/pypi/simple/ \
-    --trusted-host mirrors.aliyun.com \
-    --extra-index-url http://pypi.org/simple/ \
-    --trusted-host pypi.org \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    --extra-index-url https://pypi.org/simple \
     paho-mqtt>=1.6.1 \
     requests>=2.31.0 \
     pyyaml>=6.0.1 \
