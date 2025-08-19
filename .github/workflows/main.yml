@@ -19,10 +19,10 @@ jobs:
 
       - name: Debug: List directories
         run: |
-          echo "📁 Root:"
+          echo "📁 Root directory:"
           ls -la
-          echo "📁 ha-addon-163-gateway/:"
-          ls -la ha-addon-163-gateway/ || echo "Directory not found!"
+          echo "📁 Contents of ha-addon-163-gateway/:"
+          ls -la ha-addon-163-gateway/ || echo "Not found!"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
