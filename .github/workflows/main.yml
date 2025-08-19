@@ -40,11 +40,11 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ${{ env.ADDON_DIR }}
-          file: ${{ env.ADDON_DIR }}/Dockerfile
+          context: ha-addon-163-gateway/ha_to_163
+          file: ha-addon-163-gateway/ha_to_163/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ghcr.io/${{ env.IMAGE_NAME }}/ha-to-163-gateway:latest
-            ghcr.io/${{ env.IMAGE_NAME }}/ha-to-163-gateway:${{ github.sha }}
-          provenance: mode=max # 使用provenance替代attest
+            ghcr.io/dmxmj/ha-addon-163-gateway/ha-to-163-gateway:latest
+            ghcr.io/dmxmj/ha-addon-163-gateway/ha-to-163-gateway:${{ github.sha }}
+          provenance: mode=max
