@@ -43,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ha_to_163
-          file: ha_to_163/Dockerfile.debug
+          file: ha_to_163/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
