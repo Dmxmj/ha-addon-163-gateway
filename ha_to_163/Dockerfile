@@ -1,4 +1,3 @@
-# 使用 Alpine 镜像
 FROM alpine:3.18
 
 # 设置环境变量
@@ -7,20 +6,22 @@ ENV PYTHONUNBUFFERED=1
 # 设置工作目录
 WORKDIR /app
 
-# 安装 Python 和依赖
+# 安装 Python 和构建依赖
 RUN apk add --no-cache \
     python3 \
     py3-pip \
+    ca-certificates \
+    curl \
     gcc \
     python3-dev \
-    musl-dev \
-    ca-certificates \
-    curl
+    musl-dev
 
-# 使用阿里云源安装 Python 包
+# 使用阿里云源安装依赖（HTTP + trusted-host）
 RUN python3 -m pip install --no-cache-dir \
     --index-url http://mirrors.aliyun.com/pypi/simple/ \
     --trusted-host mirrors.aliyun.com \
+    --extra-index-url http://pypi.org/simple/ \
+    --trusted-host pypi.org \
     paho-mqtt>=1.6.1 \
     requests>=2.31.0 \
     pyyaml>=6.0.1 \
