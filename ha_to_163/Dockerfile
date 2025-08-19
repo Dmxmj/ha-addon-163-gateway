@@ -2,17 +2,13 @@
 ARG BUILD_FROM=alpine:3.18
 FROM ${BUILD_FROM}
 
-# 设置环境变量（确保 pip 使用国内源）
+# 设置环境变量
 ENV PYTHONUNBUFFERED=1
-ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ENV PIP_EXTRA_INDEX_URL=https://pypi.org/simple
-ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 设置工作目录
 WORKDIR /app
 
-# 安装 Python 和编译工具
+# 安装必要工具
 RUN apk add --no-cache \
     python3 \
     py3-pip \
@@ -21,18 +17,27 @@ RUN apk add --no-cache \
     musl-dev \
     ca-certificates \
     openssl \
-    && \
-    # 强制更新 CA 证书（关键！解决 HTTPS 问题）
-    update-ca-certificates --fresh
+    curl \
+    bind-tools  # 提供 dig 命令
 
-# 验证 pip 可用
-RUN python3 -m pip --version
+# 更新 CA 证书
+RUN update-ca-certificates --fresh
 
-# 手动指定源安装依赖（最可靠方式）
+# 诊断 1: 测试 DNS 是否正常
+RUN echo "=== Testing DNS ===" && \
+    nslookup mirrors.aliyun.com
+
+# 诊断 2: 测试网络连通性
+RUN echo "=== Testing HTTP Access ===" && \
+    curl -I -s --connect-timeout 10 https://mirrors.aliyun.com/pypi/simple/paho-mqtt/ || \
+    echo "Warning: HTTPS failed, trying HTTP" && \
+    curl -I -s http://mirrors.aliyun.com/pypi/simple/paho-mqtt/
+
+# 安装依赖：使用 HTTP + trusted-host（绕过 HTTPS 问题）
 RUN python3 -m pip install --no-cache-dir \
-    --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --index-url http://mirrors.aliyun.com/pypi/simple/ \
     --trusted-host mirrors.aliyun.com \
-    --extra-index-url https://pypi.org/simple \
+    --extra-index-url http://pypi.org/simple/ \
     --trusted-host pypi.org \
     paho-mqtt>=1.6.1 \
     requests>=2.31.0 \
