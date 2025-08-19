@@ -5,13 +5,13 @@ on:
     branches:
       - main
     tags:
-      - 'v*'  # 例如 v1.0.0
+      - 'v*' # 支持版本标签如 v1.0.0
   pull_request: {}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  ADDON_DIR: ha-addon-163-gateway/ha_to_163_gateway  # ✅ 修正路径
+  ADDON_DIR: ha-addon-163-gateway/ha_to_163_gateway # 确保这是正确的路径
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          if [[ ${{ github.ref_type }} == "tag" ]]; then
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           else
             echo "version=latest" >> $GITHUB_OUTPUT
@@ -35,8 +35,6 @@ jobs:
 
       - name: Set up QEMU for multi-arch
         uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -60,10 +58,10 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ${{ env.ADDON_DIR }}                     # ✅ 使用正确路径
-          file: ${{ env.ADDON_DIR }}/Dockerfile             # ✅ 使用正确路径
+          context: ${{ env.ADDON_DIR }}
+          file: ${{ env.ADDON_DIR }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance
+          provenance: mode=max # 使用provenance替代attest
