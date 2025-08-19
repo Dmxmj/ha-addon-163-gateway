@@ -3,10 +3,14 @@ name: Build and Publish Add-on
 on:
   push:
     branches: [ main, master ]
-    paths: [ "ha_to_163/**" ]
+    paths: 
+      - "ha_to_163/**"
+      - ".github/workflows/**"  # ✅ 建议加上，防止 workflow 修改不触发
   pull_request:
     branches: [ main, master ]
-    paths: [ "ha_to_163/**" ]
+    paths: 
+      - "ha_to_163/**"
+      - ".github/workflows/**"
 
 jobs:
   build:
@@ -55,3 +59,4 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=min  # 减少元数据，加快构建
