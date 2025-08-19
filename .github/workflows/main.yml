@@ -1,49 +1,51 @@
-name: Build and Release Add-on
+name: Build Docker Image
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*' # 支持版本标签如 v1.0.0
-  pull_request: {}
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  ADDON_DIR: ha-addon-163-gateway/ha_to_163 # 确保这是正确的路径
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       packages: write
+      contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for multi-arch
+      - name: Debug: List directories
+        run: |
+          echo "📁 Root:"
+          ls -la
+          echo "📁 ha-addon-163-gateway/:"
+          ls -la ha-addon-163-gateway/ || echo "Directory not found!"
+
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ha-addon-163-gateway/ha_to_163
-          file: ha-addon-163-gateway/ha_to_163/Dockerfile
+          context: ha-addon-163-gateway/ha-to-163    # ⚠️ 改成你实际的文件夹名
+          file: ha-addon-163-gateway/ha-to-163/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: |
             ghcr.io/dmxmj/ha-addon-163-gateway/ha-to-163-gateway:latest
             ghcr.io/dmxmj/ha-addon-163-gateway/ha-to-163-gateway:${{ github.sha }}
