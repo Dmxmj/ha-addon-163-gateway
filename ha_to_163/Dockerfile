@@ -1,34 +1,38 @@
 FROM alpine:3.18
 
-# 安装Python和必要工具
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    gcc \
-    python3-dev \
-    musl-dev && \
-    rm -rf /var/cache/apk/*
+# 基于Home Assistant官方基础镜像（通过BUILD_FROM参数传入，自动匹配架构）
+ARG BUILD_FROM
+FROM ${BUILD_FROM}
 
+# 定义构建参数（从workflow传入）
+ARG BUILD_VERSION
+ARG BUILD_DATE
+
+# 标签信息
+LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="addon" \
+    io.hass.arch="amd64|aarch64" \
+    org.opencontainers.image.version="${BUILD_VERSION}" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}"
+
+# 安装Python依赖
+RUN \
+    apk add --no-cache \
+        python3 \
+        py3-pip \
+    && pip3 install --no-cache-dir \
+        paho-mqtt==1.6.1 \
+        requests==2.31.0 \
+        ntplib==0.4.0
+
+# 复制Add-on文件到镜像中
+COPY . /app/
 WORKDIR /app
 
-# 复制依赖文件
-COPY requirements.txt .
+# 赋予启动脚本执行权限
+RUN chmod +x /app/run.sh
 
-# 使用多源安装（优先国内源，提高成功率）
-RUN pip3 install --no-cache-dir \
-    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
-    --extra-index-url https://pypi.org/simple \
-    paho-mqtt>=1.6.1 \
-    requests>=2.31.0 \
-    pyyaml>=6.0.1 \
-    ntplib>=0.3.0
-
-# 验证关键依赖安装
-RUN pip3 list | grep -E "requests|paho-mqtt|pyyaml|ntplib"
-
-# 复制应用文件
-COPY . .
-
-# 启动命令（直接运行Python主程序）
-CMD ["python3", "/app/main.py"]
-    
+# 启动命令（执行run.sh）
+CMD ["/app/run.sh"]
