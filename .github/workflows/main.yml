@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'ha-addon-163-gateway/**'  # 修正目录名拼写
-      - '.github/workflows/main.yml'  # 修正工作流文件名
+      - 'ha-addon-163-gateway/**'  # 修正目录名拼写（gatewa → gateway）
+      - '.github/workflows/main.yml'  # 修正工作流文件名（build.yml → main.yml）
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
       - name: 提取插件版本（从config.json）
         id: version
         run: |
-          # 修正文件路径：正确指向ha_to_163子目录下的config.json
+          # 修正路径：正确指向ha-addon-163-gateway/ha_to_163/config.json
           echo "VERSION=$(jq -r '.version' ha-addon-163-gateway/ha_to_163/config.json)" >> $GITHUB_OUTPUT
 
       - name: 构建并推送多架构镜像
@@ -35,7 +35,7 @@ jobs:
         with:
           context: ./ha-addon-163-gateway/ha_to_163  # 修正构建上下文路径
           file: ./ha-addon-163-gateway/ha_to_163/Dockerfile  # 修正Dockerfile路径
-          platforms: linux/amd64,linux/arm64  # 可根据需要添加其他架构
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/dmxmj/ha-to-163-gateway/amd64:${{ steps.version.outputs.VERSION }}
