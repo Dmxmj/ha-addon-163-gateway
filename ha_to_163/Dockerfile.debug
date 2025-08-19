@@ -1,0 +1,51 @@
+# 使用 Alpine 镜像
+FROM alpine:3.18
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装必要工具
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    ca-certificates \
+    openssl \
+    curl \
+    bind-tools
+
+# 诊断 1: 查看系统信息
+RUN echo "=== OS Info ===" && cat /etc/alpine-release && uname -a
+
+# 诊断 2: Python 版本
+RUN echo "=== Python Version ===" && python3 --version
+
+# 诊断 3: pip 版本
+RUN echo "=== Pip Version ===" && python3 -m pip --version
+
+# 诊断 4: 查看 pip 配置
+RUN echo "=== Pip Debug ===" && python3 -m pip debug --verbose
+
+# 诊断 5: DNS 解析测试
+RUN echo "=== DNS Test ===" && \
+    nslookup mirrors.aliyun.com && \
+    nslookup pypi.org
+
+# 诊断 6: HTTP 访问测试（HTTP 和 HTTPS）
+RUN echo "=== HTTP Test ===" && \
+    curl -I -s --connect-timeout 10 http://mirrors.aliyun.com/pypi/simple/paho-mqtt/ && \
+    echo "HTTP OK" || echo "HTTP FAILED"
+
+RUN echo "=== HTTPS Test ===" && \
+    curl -I -s --connect-timeout 10 https://mirrors.aliyun.com/pypi/simple/paho-mqtt/ && \
+    echo "HTTPS OK" || echo "HTTPS FAILED"
+
+# 诊断 7: 尝试安装一个最小包
+RUN echo "=== Install wheel ===" && \
+    python3 -m pip install --no-cache-dir --index-url http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com wheel
+
+# 如果上面成功，再尝试安装你的包
+RUN echo "=== Install paho-mqtt ===" && \
+    python3 -m pip install --no-cache-dir \
+    --index-url http://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com \
+    paho-mqtt
