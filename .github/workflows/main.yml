@@ -27,21 +27,19 @@ jobs:
       - name: 提取插件版本（从config.json）
         id: version
         run: |
-          # 修正config.json的实际路径（位于ha_to_163子目录下）
+          # 修正文件路径：正确指向ha_to_163子目录下的config.json
           echo "VERSION=$(jq -r '.version' ha-addon-163-gateway/ha_to_163/config.json)" >> $GITHUB_OUTPUT
 
       - name: 构建并推送多架构镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./ha-addon-163-gateway/ha_to_163  # 修正Dockerfile所在目录
+          context: ./ha-addon-163-gateway/ha_to_163  # 修正构建上下文路径
           file: ./ha-addon-163-gateway/ha_to_163/Dockerfile  # 修正Dockerfile路径
-          platforms: linux/amd64,linux/arm64,linux/armv7,linux/i386  # 匹配config.json中的arch
+          platforms: linux/amd64,linux/arm64  # 可根据需要添加其他架构
           push: true
           tags: |
             ghcr.io/dmxmj/ha-to-163-gateway/amd64:${{ steps.version.outputs.VERSION }}
-            ghcr.io/dmxmj/ha-to-163-gateway/arm64:${{ steps.version.outputs.VERSION }}
-            ghcr.io/dmxmj/ha-to-163-gateway/armv7:${{ steps.version.outputs.VERSION }}
-            ghcr.io/dmxmj/ha-to-163-gateway/i386:${{ steps.version.outputs.VERSION }}
+            ghcr.io/dmxmj/ha-to-163-gateway/aarch64:${{ steps.version.outputs.VERSION }}
           build-args: |
             BUILD_FROM=homeassistant/{arch}-base:latest
             BUILD_VERSION=${{ steps.version.outputs.VERSION }}
