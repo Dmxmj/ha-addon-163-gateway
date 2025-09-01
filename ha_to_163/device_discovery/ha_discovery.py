@@ -29,6 +29,9 @@ PROPERTY_MAPPING = {
     "smoke": "smoke",
     "smoke_level": "smoke",
     "smoke_density": "smoke",
+    "door": "switch",
+    "door_state": "switch",
+    "door_status": "switch",
 
     # 电气设备映射
     "state": "state",
