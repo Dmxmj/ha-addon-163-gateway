@@ -89,6 +89,13 @@ class HAto163Gateway:
                         elif state == "trip" and device_type == "breaker":
                             return 2
 
+                    # 处理环境传感器中的二进制状态（如门磁）
+                    if device_type == "sensor" and entity_id.startswith("binary_sensor."):
+                        if state == "on":
+                            return 1  # 例如：门打开
+                        elif state == "off":
+                            return 0  # 例如：门关闭
+
                     # 提取数值
                     import re
                     match = re.search(r'[-+]?\d*\.\d+|\d+', state)
@@ -234,4 +241,3 @@ if __name__ == "__main__":
     )
     gateway = HAto163Gateway()
     gateway.start()
-    
