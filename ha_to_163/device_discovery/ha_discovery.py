@@ -5,7 +5,7 @@ import time
 from typing import Dict
 from .base_discovery import BaseDiscovery
 
-# 保留完整的环境传感器映射
+# 保留完整的环境传感器映射，将batt相关映射改为battery
 PROPERTY_MAPPING = {
     # 环境传感器核心映射
     "temperature": "temp",
@@ -15,16 +15,16 @@ PROPERTY_MAPPING = {
     "humidity": "hum",
     "hum": "hum",
     "humidity_percent": "hum",
-    "battery": "batt",
-    "batt": "batt",
-    "battery_level": "batt",
-    "battery_percent": "batt",
+    "battery": "battery",  # 改为battery
+    "batt": "battery",     # 改为battery
+    "battery_level": "battery",  # 改为battery
+    "battery_percent": "battery",  # 改为battery
     "temperature_p": "temp",
     "temp_p": "temp",
     "humidity_p": "hum",
     "hum_p": "hum",
-    "battery_p": "batt",
-    "batt_p": "batt",
+    "battery_p": "battery",  # 改为battery
+    "batt_p": "battery",     # 改为battery
     "smoke_concentration": "smoke", 
     "smoke": "smoke",
     "smoke_level": "smoke",
@@ -60,21 +60,22 @@ class HADiscovery(BaseDiscovery):
         self.entities = []
         self.sub_devices = [d for d in config.get("sub_devices", []) if d.get("enabled", True)]
         self.electric_device_types = {"switch", "socket", "breaker"}
+        # 环境传感器类型增加对门磁的支持
         self.environment_types = {"sensor"}
 
     def load_ha_entities(self) -> bool:
         try:
             self.logger.info(f"从HA获取实体列表: {self.ha_url}/api/states")
             resp = None
-            retry_attempts = self.config.get("retry_attempts", 5)
-            retry_delay = self.config.get("retry_delay", 3)
+            retry_attempts = self.config.get("retry_attempts", 15)
+            retry_delay = self.config.get("retry_delay", 5)
 
             for attempt in range(retry_attempts):
                 try:
                     resp = requests.get(
                         f"{self.ha_url}/api/states",
                         headers=self.ha_headers,
-                        timeout=10
+                        timeout=20
                     )
                     resp.raise_for_status()
                     break
@@ -90,13 +91,14 @@ class HADiscovery(BaseDiscovery):
             self.entities = resp.json()
             self.logger.info(f"HA共返回 {len(self.entities)} 个实体")
             
-            # 重点日志：输出所有含"hz2_01"或"hz2_02"的传感器实体（环境传感器候选）
-            hz2_entities = [
+            # 重点日志：输出所有含"men_ci_"的传感器实体（门磁传感器候选）
+            men_ci_entities = [
                 e.get('entity_id') for e in self.entities 
-                if e.get('entity_id', '').startswith('sensor.') and 
-                ('hz2_01' in e.get('entity_id') or 'hz2_02' in e.get('entity_id'))
+                if (e.get('entity_id', '').startswith('sensor.') or 
+                    e.get('entity_id', '').startswith('binary_sensor.')) and 
+                'men_ci_' in e.get('entity_id')
             ]
-            self.logger.debug(f"环境传感器候选实体（含hz2_01/hz2_02）: {hz2_entities}")
+            self.logger.debug(f"门磁传感器候选实体（含men_ci_）: {men_ci_entities}")
             return True
         except Exception as e:
             self.logger.error(f"加载HA实体失败: {e}")
@@ -108,13 +110,16 @@ class HADiscovery(BaseDiscovery):
         for device in self.sub_devices:
             device_id = device["id"]
             device_type = device["type"]
-            # 修正：环境传感器的前缀去掉"sensor."（仅保留设备标识部分）
+            # 修正：环境传感器的前缀去掉"sensor."或"binary_sensor."（仅保留设备标识部分）
             ha_prefix = device["ha_entity_prefix"]
-            if device_type in self.environment_types and ha_prefix.startswith("sensor."):
-                cleaned_prefix = ha_prefix[len("sensor."):]  # 如"sensor.hz2_01_" → "hz2_01_"
+            cleaned_prefix = ha_prefix
+            if device_type in self.environment_types:
+                if ha_prefix.startswith("sensor."):
+                    cleaned_prefix = ha_prefix[len("sensor."):]  # 如"sensor.men_ci_" → "men_ci_"
+                elif ha_prefix.startswith("binary_sensor."):
+                    cleaned_prefix = ha_prefix[len("binary_sensor."):]  # 如"binary_sensor.men_ci_" → "men_ci_"
                 self.logger.debug(f"环境传感器 {device_id} 前缀修正: {ha_prefix} → {cleaned_prefix}")
-            else:
-                cleaned_prefix = ha_prefix
+            
             matched_devices[device_id] = {
                 "config": device,
                 "entities": {},
@@ -128,8 +133,8 @@ class HADiscovery(BaseDiscovery):
             device_class = attributes.get("device_class", "").lower()
             friendly_name = attributes.get("friendly_name", "").lower()
 
-            # 环境传感器处理
-            if entity_id.startswith("sensor."):
+            # 环境传感器处理：同时支持sensor和binary_sensor
+            if entity_id.startswith(("sensor.", "binary_sensor.")):
                 self._match_environment_sensor(entity_id, device_class, friendly_name, matched_devices)
             
             # 电气设备处理
@@ -140,14 +145,24 @@ class HADiscovery(BaseDiscovery):
         for device_id, device_data in matched_devices.items():
             device_type = device_data["config"]["type"]
             if device_type in self.environment_types:
-                temp_status = "已匹配" if "temp" in device_data["entities"] else "未匹配"
-                hum_status = "已匹配" if "hum" in device_data["entities"] else "未匹配"
-                batt_status = "已匹配" if "batt" in device_data["entities"] else "未匹配"
-                self.logger.info(
-                    f"环境传感器 {device_id} 状态: "
-                    f"temp={temp_status}, hum={hum_status}, batt={batt_status} → "
-                    f"匹配实体: {device_data['entities']}（使用前缀: {device_data['cleaned_prefix']}）"
-                )
+                # 区分门磁和普通传感器的日志显示
+                if "door_sensor" in device_id:
+                    switch_status = "已匹配" if "switch" in device_data["entities"] else "未匹配"
+                    battery_status = "已匹配" if "battery" in device_data["entities"] else "未匹配"
+                    self.logger.info(
+                        f"门磁传感器 {device_id} 状态: "
+                        f"switch={switch_status}, battery={battery_status} → "
+                        f"匹配实体: {device_data['entities']}（使用前缀: {device_data['cleaned_prefix']}）"
+                    )
+                else:
+                    temp_status = "已匹配" if "temp" in device_data["entities"] else "未匹配"
+                    hum_status = "已匹配" if "hum" in device_data["entities"] else "未匹配"
+                    battery_status = "已匹配" if "battery" in device_data["entities"] else "未匹配"
+                    self.logger.info(
+                        f"环境传感器 {device_id} 状态: "
+                        f"temp={temp_status}, hum={hum_status}, battery={battery_status} → "
+                        f"匹配实体: {device_data['entities']}（使用前缀: {device_data['cleaned_prefix']}）"
+                    )
             else:
                 active_power_status = "已匹配" if "active_power" in device_data["entities"] else "未匹配"
                 energy_status = "已匹配" if "energy" in device_data["entities"] else "未匹配"
@@ -160,7 +175,7 @@ class HADiscovery(BaseDiscovery):
         return matched_devices
 
     def _match_environment_sensor(self, entity_id, device_class, friendly_name, matched_devices):
-        entity_core = entity_id.split('.', 1)[1]  # 如"sensor.hz2_01_temperature_p_2_1" → "hz2_01_temperature_p_2_1"
+        entity_core = entity_id.split('.', 1)[1]  # 如"binary_sensor.men_ci_001_contact" → "men_ci_001_contact"
         self.logger.debug(f"处理环境传感器实体: {entity_id}（核心: {entity_core}, device_class: {device_class}）")
 
         for device_id, device_data in matched_devices.items():
@@ -168,19 +183,19 @@ class HADiscovery(BaseDiscovery):
             if device["type"] not in self.environment_types:
                 continue
             
-            # 使用修正后的前缀（不含"sensor."）进行匹配
+            # 使用修正后的前缀（不含"sensor."或"binary_sensor."）进行匹配
             prefix = device_data["cleaned_prefix"]
             if prefix not in entity_core:
                 self.logger.debug(f"前缀不匹配: 实体核心={entity_core}，设备前缀={prefix}（跳过）")
                 continue
 
-            # 提取实体类型部分（如"hz2_01_temperature_p_2_1" → "temperature_p_2_1"）
+            # 提取实体类型部分（如"men_ci_001_battery" → "battery"）
             entity_type_parts = entity_core.replace(prefix, "").strip('_').split('_')
             entity_type = '_'.join(entity_type_parts)
             if not entity_type:
                 continue
 
-            # 多维度匹配（恢复老代码逻辑）
+            # 多维度匹配
             property_name = None
 
             # 1. device_class匹配（最高优先级）
@@ -224,31 +239,28 @@ class HADiscovery(BaseDiscovery):
             device = device_data["config"]
             if device["type"] not in self.electric_device_types:
                 continue
-            
-            prefix = device_data["cleaned_prefix"]
-            if prefix not in entity_core:
+
+            # 电气设备前缀匹配（完整匹配前缀）
+            prefix = device["ha_entity_prefix"]
+            if not entity_id.startswith(prefix):
+                self.logger.debug(f"电气设备前缀不匹配: {entity_id} 与 {prefix}（跳过）")
                 continue
 
-            if entity_type not in ("sensor", "switch"):
+            # 提取实体类型部分
+            entity_type_part = entity_id[len(prefix):].strip('_')
+            if not entity_type_part:
                 continue
 
-            cleaned_suffix = re.sub(r'_p[_\d]+$', '', entity_core)
-            cleaned_suffix = cleaned_suffix.replace(prefix, "").strip('_')
-            self.logger.debug(f"电气设备实体清洗: {entity_core} → {cleaned_suffix}")
-
+            # 匹配属性
             property_name = None
-            if "electric_power" in cleaned_suffix:
-                property_name = "active_power"
-            elif "power_consumption" in cleaned_suffix:
-                property_name = "energy"
-            elif cleaned_suffix in PROPERTY_MAPPING:
-                property_name = PROPERTY_MAPPING[cleaned_suffix]
-            else:
-                for part in cleaned_suffix.split('_'):
-                    if part in PROPERTY_MAPPING:
-                        property_name = PROPERTY_MAPPING[part]
-                        break
+            if entity_type_part in PROPERTY_MAPPING:
+                property_name = PROPERTY_MAPPING[entity_type_part]
+            elif device_class in PROPERTY_MAPPING:
+                property_name = PROPERTY_MAPPING[device_class]
+            elif entity_type in PROPERTY_MAPPING:
+                property_name = PROPERTY_MAPPING[entity_type]
 
+            # 验证并添加匹配
             if property_name and property_name in device["supported_properties"]:
                 if property_name not in device_data["entities"]:
                     device_data["entities"][property_name] = entity_id
@@ -256,10 +268,8 @@ class HADiscovery(BaseDiscovery):
                 break
 
     def discover(self) -> Dict:
-        self.logger.info("开始设备发现...")
+        """执行设备发现流程"""
         if not self.load_ha_entities():
+            self.logger.error("加载HA实体失败，发现流程终止")
             return {}
-        matched_devices = self.match_entities_to_devices()
-        self.logger.info(f"设备发现完成，共匹配 {len(matched_devices)} 个设备")
-        return matched_devices
-    
+        return self.match_entities_to_devices()
