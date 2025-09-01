@@ -28,7 +28,7 @@
                 "device_secret": "",
                 "ha_entity_prefix": "",
                 "supported_properties": ["temp", "hum", "batt", "smoke"],
-                "enabled": true,
+                "enabled": false,
                 "type": "sensor",
                 "conversion_factors": ""
             },
@@ -39,7 +39,7 @@
                 "device_secret": "",
                 "ha_entity_prefix": "",
                 "supported_properties": ["state", "voltage", "current", "active_power"],
-                "enabled": true,
+                "enabled": false,
                 "type": "switch",
                 "conversion_factors": ""
             },
@@ -50,7 +50,7 @@
                 "device_secret": "",
                 "ha_entity_prefix": "",
                 "supported_properties": ["state", "voltage", "current", "active_power", "energy"],
-                "enabled": true,
+                "enabled": false,
                 "type": "socket",
                 "conversion_factors": "{\"voltage\": 1.0, \"current\": 1.0, \"active_power\": 1.0, \"energy\": 1.0}"
             },
@@ -61,7 +61,7 @@
                 "device_secret": "",
                 "ha_entity_prefix": "",
                 "supported_properties": ["state", "voltage", "current", "active_power", "energy", "frequency"],
-                "enabled": true,
+                "enabled": false,
                 "type": "breaker",
                 "conversion_factors": "{\"voltage\": 1.0, \"current\": 1.0, \"active_power\": 1.0, \"energy\": 1.0, \"frequency\": 1.0}"
             },
@@ -72,7 +72,7 @@
               "device_secret": "",
               "ha_entity_prefix": "", 
               "supported_properties": ["switch","battery"],
-              "enabled": true,
+              "enabled": false,
               "type": "sensor",
               "conversion_factors": "" 
             }
