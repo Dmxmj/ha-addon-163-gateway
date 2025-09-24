@@ -27,7 +27,7 @@
                 "device_name": "",
                 "device_secret": "",
                 "ha_entity_prefix": "",
-                "supported_properties": ["temp", "hum", "batt", "smoke"],
+                "supported_properties": ["temp", "hum", "batt", "smoke","co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum"],
                 "enabled": false,
                 "type": "sensor",
                 "conversion_factors": ""
