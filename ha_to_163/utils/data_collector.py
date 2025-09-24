@@ -56,7 +56,7 @@ class DataCollector:
                         # 保留小数位数
                         if prop == "current":
                             converted_value = round(converted_value, 2)
-                        elif prop in ("active_power", "voltage", "frequency"):
+                        elif prop in ("voltage", "temp", "hum", "frequency", "co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum"):
                             converted_value = round(converted_value, 1)
                         elif prop == "energy":
                             converted_value = round(converted_value, 3)  # 耗电量保留3位小数
