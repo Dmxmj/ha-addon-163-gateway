@@ -155,7 +155,7 @@ class HAto163Gateway:
                     # 根据属性类型保留小数位数
                     if prop in ("current", "active_power"):
                         converted_value = round(converted_value, 3)
-                    elif prop in ("voltage", "temp", "hum", "frequency"):
+                    elif prop in ("voltage", "temp", "hum", "frequency", "co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum"):
                         converted_value = round(converted_value, 1)
                     elif prop == "energy":
                         converted_value = round(converted_value, 4)
