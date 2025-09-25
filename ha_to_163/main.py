@@ -58,17 +58,29 @@ class HAto163Gateway:
         return False
 
     def _discover_devices(self) -> bool:
-        """执行设备发现"""
+        """执行设备发现，记录新增实体"""
         discovery = HADiscovery(self.config, self.ha_headers)
-        self.matched_devices = discovery.discover()
+        new_matched_devices = discovery.discover()
+        
+        # 对比新旧设备列表，记录新增实体
+        for device_id, new_data in new_matched_devices.items():
+            old_data = self.matched_devices.get(device_id, {})
+            old_entities = old_data.get("entities", {})
+            new_entities = new_data.get("entities", {})
+            added_entities = {k: v for k, v in new_entities.items() if k not in old_entities}
+            if added_entities:
+                self.logger.info(f"设备 {device_id} 重新发现新增实体: {added_entities}")
+        
+        self.matched_devices = new_matched_devices
         return len(self.matched_devices) > 0
 
     def _get_entity_value(self, entity_id: str, device_type: str) -> float or int or None:
-        """获取HA实体值"""
+        """获取HA实体值（优化超时逻辑）"""
         try:
-            timeout = self.config.get("entity_ready_timeout", 600)
+            # 单个实体超时设为可配置的短超时（默认30秒）
+            single_entity_timeout = self.config.get("single_entity_timeout", 30)
             start_time = time.time()
-            while time.time() - start_time < timeout:
+            while time.time() - start_time < single_entity_timeout:
                 resp = requests.get(
                     f"{self.config['ha_url']}/api/states/{entity_id}",
                     headers=self.ha_headers,
@@ -77,7 +89,7 @@ class HAto163Gateway:
                 if resp.status_code == 200:
                     state = resp.json().get("state")
                     if state in ("unknown", "unavailable", ""):
-                        time.sleep(5)
+                        time.sleep(2)  # 缩短重试间隔
                         continue
 
                     # 处理开关状态
@@ -105,9 +117,9 @@ class HAto163Gateway:
                     self.logger.warning(f"实体 {entity_id} 状态无法转换: {state}")
                     return None
 
-                time.sleep(5)
+                time.sleep(2)  # 缩短重试间隔
 
-            self.logger.error(f"实体 {entity_id} 超时未就绪")
+            self.logger.error(f"实体 {entity_id} 超时未就绪（{single_entity_timeout}秒）")
             return None
         except Exception as e:
             self.logger.error(f"获取实体 {entity_id} 失败: {e}")
@@ -170,7 +182,7 @@ class HAto163Gateway:
         return payload
 
     def _push_device_data(self, device_id: str) -> bool:
-        """推送设备数据到网易IoT平台"""
+        """推送设备数据到网易IoT平台（优化部分数据推送日志）"""
         device_data = self.matched_devices[device_id]
         device_config = device_data["config"]
 
@@ -178,7 +190,9 @@ class HAto163Gateway:
         if not payload["params"]:
             self.logger.warning(f"设备 {device_id} 无有效数据，跳过推送")
             return False
-
+        
+        # 增加部分数据推送的日志说明
+        self.logger.info(f"设备 {device_id} 部分数据就绪，推送可用数据: {payload['params'].keys()}")
         return self.mqtt_client.publish(device_config, payload)
 
     def start(self):
@@ -209,7 +223,8 @@ class HAto163Gateway:
     def _run_loop(self):
         """主循环（定时发现与推送）"""
         push_interval = self.config.get("wy_push_interval", 60)
-        discovery_interval = self.config.get("ha_discovery_interval", 3600)
+        # 缩短设备发现间隔为5分钟（300秒）
+        discovery_interval = self.config.get("ha_discovery_interval", 300)
         last_discovery = time.time()
         last_push = time.time()
 
