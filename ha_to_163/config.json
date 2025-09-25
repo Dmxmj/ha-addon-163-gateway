@@ -77,10 +77,11 @@
               "conversion_factors": "" 
             }
         ],
-        "ha_discovery_interval": 3600,
+        "ha_discovery_interval": 300,  // 改为5分钟
         "wy_push_interval": 60,
         "startup_delay": 30,
         "entity_ready_timeout": 600,
+        "single_entity_timeout": 30,   // 新增：单个实体超时时间（秒）
         "retry_attempts": 5,
         "retry_delay": 3,
         "ntp_server": "ntp.n.netease.com",
@@ -113,6 +114,7 @@
         "wy_push_interval": "int",
         "startup_delay": "int",
         "entity_ready_timeout": "int",
+        "single_entity_timeout": "int",  // 新增：配置校验
         "retry_attempts": "int",
         "retry_delay": "int",
         "ntp_server": "str",
@@ -128,4 +130,3 @@
     "devices": [],
     "privileged": []
 }
-    
