@@ -74,7 +74,7 @@
                 "supported_properties": ["switch", "battery"],
                 "enabled": false,
                 "type": "sensor",
-                "conversion_factors": ""  // 关键修正：移除此处多余的空格
+                "conversion_factors": ""
             }
         ],
         "ha_discovery_interval": 300,
