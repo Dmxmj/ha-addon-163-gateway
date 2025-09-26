@@ -3,6 +3,8 @@ import time
 import json
 import signal
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from utils.config_loader import ConfigLoader
 from utils.mqtt_client import MQTTClient
 from device_discovery.ha_discovery import HADiscovery
@@ -25,6 +27,7 @@ class HAto163Gateway:
         self.matched_devices = {}
         self.mqtt_client = MQTTClient(self.config)
         self.running = True
+        self.executor = None  # 线程池实例
 
         # 注册退出信号
         signal.signal(signal.SIGINT, self._stop)
@@ -33,6 +36,10 @@ class HAto163Gateway:
     def _stop(self, signum, frame):
         self.logger.info("收到停止信号，正在退出...")
         self.running = False
+        # 关闭线程池
+        if self.executor:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        # 断开MQTT连接
         if hasattr(self, 'mqtt_client') and self.mqtt_client:
             self.mqtt_client.disconnect()
 
@@ -75,49 +82,50 @@ class HAto163Gateway:
         return len(self.matched_devices) > 0
 
     def _get_entity_value(self, entity_id: str, device_type: str) -> float or int or None:
-        """获取HA实体值（优化超时逻辑）"""
+        """获取HA实体值（带超时控制）"""
         try:
             # 单个实体超时设为可配置的短超时（默认30秒）
             single_entity_timeout = self.config.get("single_entity_timeout", 30)
             start_time = time.time()
+            
             while time.time() - start_time < single_entity_timeout:
-                resp = requests.get(
-                    f"{self.config['ha_url']}/api/states/{entity_id}",
-                    headers=self.ha_headers,
-                    timeout=5
-                )
-                if resp.status_code == 200:
-                    state = resp.json().get("state")
-                    if state in ("unknown", "unavailable", ""):
-                        time.sleep(2)  # 缩短重试间隔
-                        continue
+                try:
+                    resp = requests.get(
+                        f"{self.config['ha_url']}/api/states/{entity_id}",
+                        headers=self.ha_headers,
+                        timeout=5  # 单次请求超时
+                    )
+                    
+                    if resp.status_code == 200:
+                        state = resp.json().get("state")
+                        if state in ("unknown", "unavailable", ""):
+                            time.sleep(2)  # 短间隔重试
+                            continue
 
-                    # 处理开关状态
-                    if device_type in ("switch", "socket", "breaker"):
-                        if state == "on":
-                            return 1
-                        elif state == "off":
-                            return 0
-                        elif state == "trip" and device_type == "breaker":
-                            return 2
+                        # 处理开关状态
+                        if device_type in ("switch", "socket", "breaker"):
+                            if state == "on":
+                                return 1
+                            elif state == "off":
+                                return 0
+                            elif state == "trip" and device_type == "breaker":
+                                return 2
 
-                    # 处理环境传感器中的二进制状态（如门磁）
-                    if device_type == "sensor" and entity_id.startswith("binary_sensor."):
-                        if state == "on":
-                            return 1  # 例如：门打开
-                        elif state == "off":
-                            return 0  # 例如：门关闭
+                        # 处理环境传感器中的二进制状态（如门磁）
+                        if device_type == "sensor" and entity_id.startswith("binary_sensor."):
+                            return 1 if state == "on" else 0
 
-                    # 提取数值
-                    import re
-                    match = re.search(r'[-+]?\d*\.\d+|\d+', state)
-                    if match:
-                        return float(match.group())
+                        # 提取数值
+                        import re
+                        match = re.search(r'[-+]?\d*\.\d+|\d+', state)
+                        if match:
+                            return float(match.group())
 
-                    self.logger.warning(f"实体 {entity_id} 状态无法转换: {state}")
-                    return None
-
-                time.sleep(2)  # 缩短重试间隔
+                        self.logger.warning(f"实体 {entity_id} 状态无法转换: {state}")
+                        return None
+                except Exception as e:
+                    self.logger.warning(f"获取实体 {entity_id} 临时失败: {e}")
+                    time.sleep(2)  # 出错重试间隔
 
             self.logger.error(f"实体 {entity_id} 超时未就绪（{single_entity_timeout}秒）")
             return None
@@ -136,13 +144,13 @@ class HAto163Gateway:
             return {}
 
     def _collect_device_data(self, device_id: str) -> dict:
-        """收集设备数据（排除state字段的转换）"""
+        """收集设备数据"""
         device_data = self.matched_devices[device_id]
         device_config = device_data["config"]
         device_type = device_config["type"]
         entities = device_data["entities"]
         
-        # 解析转换系数（从字符串转为字典）
+        # 解析转换系数
         factors_str = device_config.get("conversion_factors", "")
         conversion_factors = self._parse_conversion_factors(factors_str)
         self.logger.debug(f"设备 {device_id} 转换系数: {conversion_factors}")
@@ -161,10 +169,10 @@ class HAto163Gateway:
                     payload["params"][prop] = value
                     self.logger.info(f"  收集到 {prop} = {value}（不转换，实体: {entity_id}）")
                 else:
-                    # 其他属性应用转换系数
+                    # 应用转换系数
                     factor = conversion_factors.get(prop, 1.0)
                     converted_value = value * factor
-                    # 根据属性类型保留小数位数
+                    # 按属性类型保留小数
                     if prop in ("current", "active_power"):
                         converted_value = round(converted_value, 3)
                     elif prop in ("voltage", "temp", "hum", "frequency", "co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum"):
@@ -182,7 +190,7 @@ class HAto163Gateway:
         return payload
 
     def _push_device_data(self, device_id: str) -> bool:
-        """推送设备数据到网易IoT平台（优化部分数据推送日志）"""
+        """推送设备数据到网易IoT平台"""
         device_data = self.matched_devices[device_id]
         device_config = device_data["config"]
 
@@ -191,16 +199,30 @@ class HAto163Gateway:
             self.logger.warning(f"设备 {device_id} 无有效数据，跳过推送")
             return False
         
-        # 增加部分数据推送的日志说明
-        self.logger.info(f"设备 {device_id} 部分数据就绪，推送可用数据: {payload['params'].keys()}")
+        self.logger.info(f"设备 {device_id} 推送可用数据: {payload['params'].keys()}")
         return self.mqtt_client.publish(device_config, payload)
+
+    def _push_device_with_timeout(self, device_id: str, timeout: int) -> bool:
+        """带超时的设备推送包装函数（供线程调用）"""
+        def push_task():
+            return self._push_device_data(device_id)
+        
+        # 使用线程实现超时控制
+        push_thread = threading.Thread(target=push_task, daemon=True)
+        push_thread.start()
+        push_thread.join(timeout=timeout)
+        
+        if push_thread.is_alive():
+            self.logger.error(f"设备 {device_id} 推送超时（超过{timeout}秒）")
+            return False
+        return True
 
     def start(self):
         """启动服务"""
         self.logger.info("===== HA to 163 Gateway 启动 =====")
 
         # 启动延迟
-        startup_delay = self.config.get("startup_delay", 120)
+        startup_delay = self.config.get("startup_delay", 30)
         self.logger.info(f"启动延迟 {startup_delay} 秒...")
         time.sleep(startup_delay)
 
@@ -221,12 +243,15 @@ class HAto163Gateway:
         self._run_loop()
 
     def _run_loop(self):
-        """主循环（定时发现与推送）"""
+        """主循环（异步推送实现）"""
         push_interval = self.config.get("wy_push_interval", 60)
-        # 缩短设备发现间隔为5分钟（300秒）
         discovery_interval = self.config.get("ha_discovery_interval", 300)
         last_discovery = time.time()
         last_push = time.time()
+        
+        # 初始化线程池
+        max_workers = min(len(self.matched_devices), 10) if self.matched_devices else 1
+        self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="DevicePush")
 
         while self.running:
             now = time.time()
@@ -236,13 +261,39 @@ class HAto163Gateway:
                 self.logger.info("执行定时设备发现...")
                 self._discover_devices()
                 last_discovery = now
+                # 动态调整线程池大小
+                max_workers = min(len(self.matched_devices), 10) if self.matched_devices else 1
+                # 关闭旧线程池，创建新线程池
+                if self.executor:
+                    self.executor.shutdown(wait=False)
+                self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="DevicePush")
 
-            # 定时推送数据
+            # 定时异步推送数据
             if now - last_push >= push_interval:
-                self.logger.info("开始数据推送...")
+                self.logger.info("开始异步数据推送...")
+                futures = []
+                
+                # 提交所有设备推送任务
                 for device_id in self.matched_devices:
-                    self.logger.info(f"\n推送设备 {device_id} 数据")
-                    self._push_device_data(device_id)
+                    future = self.executor.submit(
+                        self._push_device_with_timeout, 
+                        device_id, 
+                        timeout=60  # 单个设备推送超时
+                    )
+                    futures.append((device_id, future))
+
+                # 处理推送结果
+                for device_id, future in futures:
+                    try:
+                        # 等待任务结果（设置略长于单个设备超时）
+                        result = future.result(timeout=65)
+                        if result:
+                            self.logger.info(f"设备 {device_id} 异步推送完成")
+                        else:
+                            self.logger.warning(f"设备 {device_id} 异步推送无有效数据")
+                    except Exception as e:
+                        self.logger.error(f"设备 {device_id} 异步推送异常: {str(e)}")
+
                 last_push = now
 
             time.sleep(1)
@@ -256,3 +307,4 @@ if __name__ == "__main__":
     )
     gateway = HAto163Gateway()
     gateway.start()
+    
