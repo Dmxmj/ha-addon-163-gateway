@@ -16,6 +16,8 @@ class HAto163Gateway:
         self.config_loader = ConfigLoader()
         self.config = self.config_loader.config
         self.logger = logging.getLogger("ha_to_163")
+        self.ha_session = requests.Session()
+        self.ha_session.headers.update(self.ha_headers)
 
         # 初始化HA请求头
         self.ha_headers = {
@@ -66,7 +68,11 @@ class HAto163Gateway:
 
     def _discover_devices(self) -> bool:
         """执行设备发现，记录新增实体"""
-        discovery = HADiscovery(self.config, self.ha_headers)
+        discovery = HADiscovery(
+            self.config, 
+            self.ha_headers, 
+            self.ha_session  # 传递Session对象
+        )
         new_matched_devices = discovery.discover()
         
         # 对比新旧设备列表，记录新增实体
@@ -241,6 +247,19 @@ class HAto163Gateway:
 
         # 主循环
         self._run_loop()
+        
+    def _stop(self, signum, frame):
+        self.logger.info("收到停止信号，正在退出...")
+        self.running = False
+        # 关闭线程池
+        if self.executor:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        # 断开MQTT连接
+        if hasattr(self, 'mqtt_client') and self.mqtt_client:
+            self.mqtt_client.disconnect()
+        # 关闭HTTP会话（新增，释放资源）
+        if hasattr(self, 'ha_session'):
+            self.ha_session.close()
 
     def _run_loop(self):
         """主循环（异步推送实现）"""
