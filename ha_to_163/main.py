@@ -12,103 +12,122 @@ from device_discovery.ha_discovery import HADiscovery
 
 class HAto163Gateway:
     def __init__(self):
-        # 加载配置
+        # 1. 加载配置（优先初始化，其他模块依赖配置）
         self.config_loader = ConfigLoader()
         self.config = self.config_loader.config
         self.logger = logging.getLogger("ha_to_163")
-        self.ha_session = requests.Session()
-        self.ha_session.headers.update(self.ha_headers)
 
-        # 初始化HA请求头
+        # 2. 初始化HA请求头（必须在会话之前）
         self.ha_headers = {
             "Authorization": f"Bearer {self.config['ha_token']}",
             "Content-Type": "application/json"
         }
 
-        # 设备与MQTT客户端
+        # 3. 创建HTTP会话（复用连接，需在headers之后）
+        self.ha_session = requests.Session()
+        self.ha_session.headers.update(self.ha_headers)
+
+        # 4. 设备与MQTT客户端初始化
         self.matched_devices = {}
-        self.mqtt_client = MQTTClient(self.config)
+        self.mqtt_client = MQTTClient(self.config, self.ha_session)  # 传递会话供MQTT使用
         self.running = True
         self.executor = None  # 线程池实例
 
-        # 注册退出信号
+        # 注册退出信号处理
         signal.signal(signal.SIGINT, self._stop)
         signal.signal(signal.SIGTERM, self._stop)
 
     def _stop(self, signum, frame):
-        self.logger.info("收到停止信号，正在退出...")
+        """处理程序退出，释放资源"""
+        self.logger.info("收到停止信号，正在安全退出...")
         self.running = False
+        
         # 关闭线程池
         if self.executor:
             self.executor.shutdown(wait=False, cancel_futures=True)
+            self.logger.info("线程池已关闭")
+        
         # 断开MQTT连接
         if hasattr(self, 'mqtt_client') and self.mqtt_client:
             self.mqtt_client.disconnect()
+            self.logger.info("MQTT连接已断开")
+        
+        # 关闭HTTP会话
+        if hasattr(self, 'ha_session'):
+            self.ha_session.close()
+            self.logger.info("HTTP会话已关闭")
 
     def _wait_for_ha_ready(self) -> bool:
-        """等待Home Assistant就绪"""
+        """等待Home Assistant服务就绪"""
         timeout = self.config.get("entity_ready_timeout", 600)
         start_time = time.time()
+        self.logger.info(f"等待HA就绪（超时时间: {timeout}秒）")
+
         while time.time() - start_time < timeout:
             try:
-                resp = requests.get(
+                resp = self.ha_session.get(
                     f"{self.config['ha_url']}/api/",
-                    headers=self.ha_headers,
                     timeout=10
                 )
                 if resp.status_code == 200:
                     self.logger.info("Home Assistant已就绪")
                     return True
-            except Exception as e:
-                self.logger.warning(f"HA未就绪: {e}")
-            time.sleep(10)
+            except requests.exceptions.RequestException as e:
+                self.logger.warning(f"HA未就绪: {str(e)}，将重试")
+            
+            time.sleep(10)  # 间隔10秒重试
 
-        self.logger.error(f"HA超时未就绪（{timeout}秒）")
+        self.logger.error(f"HA超时未就绪（超过{timeout}秒）")
         return False
 
     def _discover_devices(self) -> bool:
-        """执行设备发现，记录新增实体"""
-        discovery = HADiscovery(
-            self.config, 
-            self.ha_headers, 
-            self.ha_session  # 传递Session对象
-        )
-        new_matched_devices = discovery.discover()
-        
-        # 对比新旧设备列表，记录新增实体
-        for device_id, new_data in new_matched_devices.items():
-            old_data = self.matched_devices.get(device_id, {})
-            old_entities = old_data.get("entities", {})
-            new_entities = new_data.get("entities", {})
-            added_entities = {k: v for k, v in new_entities.items() if k not in old_entities}
-            if added_entities:
-                self.logger.info(f"设备 {device_id} 重新发现新增实体: {added_entities}")
-        
-        self.matched_devices = new_matched_devices
-        return len(self.matched_devices) > 0
+        """执行设备发现，匹配HA实体与子设备"""
+        try:
+            # 关键修复：传递三个必要参数（config, headers, session）
+            discovery = HADiscovery(
+                self.config,
+                self.ha_headers,
+                self.ha_session
+            )
+            new_matched_devices = discovery.discover()
+
+            # 记录新增实体
+            for device_id, new_data in new_matched_devices.items():
+                old_data = self.matched_devices.get(device_id, {})
+                old_entities = old_data.get("entities", {})
+                new_entities = new_data.get("entities", {})
+                added_entities = {k: v for k, v in new_entities.items() if k not in old_entities}
+                
+                if added_entities:
+                    self.logger.info(f"设备 {device_id} 新增匹配实体: {added_entities}")
+
+            self.matched_devices = new_matched_devices
+            return len(self.matched_devices) > 0
+
+        except Exception as e:
+            self.logger.error(f"设备发现失败: {str(e)}")
+            return False
 
     def _get_entity_value(self, entity_id: str, device_type: str) -> float or int or None:
         """获取HA实体值（带超时控制）"""
         try:
-            # 单个实体超时设为可配置的短超时（默认30秒）
             single_entity_timeout = self.config.get("single_entity_timeout", 30)
             start_time = time.time()
             
             while time.time() - start_time < single_entity_timeout:
                 try:
-                    resp = requests.get(
+                    resp = self.ha_session.get(
                         f"{self.config['ha_url']}/api/states/{entity_id}",
-                        headers=self.ha_headers,
                         timeout=5  # 单次请求超时
                     )
                     
                     if resp.status_code == 200:
                         state = resp.json().get("state")
                         if state in ("unknown", "unavailable", ""):
-                            time.sleep(2)  # 短间隔重试
+                            time.sleep(2)
                             continue
 
-                        # 处理开关状态
+                        # 处理开关类设备状态
                         if device_type in ("switch", "socket", "breaker"):
                             if state == "on":
                                 return 1
@@ -117,40 +136,42 @@ class HAto163Gateway:
                             elif state == "trip" and device_type == "breaker":
                                 return 2
 
-                        # 处理环境传感器中的二进制状态（如门磁）
+                        # 处理二进制传感器（如门磁）
                         if device_type == "sensor" and entity_id.startswith("binary_sensor."):
                             return 1 if state == "on" else 0
 
-                        # 提取数值
+                        # 提取数值型状态
                         import re
                         match = re.search(r'[-+]?\d*\.\d+|\d+', state)
                         if match:
                             return float(match.group())
 
-                        self.logger.warning(f"实体 {entity_id} 状态无法转换: {state}")
+                        self.logger.warning(f"实体 {entity_id} 状态无法转换为数值: {state}")
                         return None
-                except Exception as e:
-                    self.logger.warning(f"获取实体 {entity_id} 临时失败: {e}")
-                    time.sleep(2)  # 出错重试间隔
+
+                except requests.exceptions.RequestException as e:
+                    self.logger.warning(f"获取实体 {entity_id} 临时失败: {str(e)}")
+                    time.sleep(2)
 
             self.logger.error(f"实体 {entity_id} 超时未就绪（{single_entity_timeout}秒）")
             return None
+
         except Exception as e:
-            self.logger.error(f"获取实体 {entity_id} 失败: {e}")
+            self.logger.error(f"获取实体 {entity_id} 失败: {str(e)}")
             return None
 
     def _parse_conversion_factors(self, factors_str: str) -> dict:
-        """将字符串转换为转换系数字典"""
+        """解析转换系数（字符串转字典）"""
         if not factors_str:
             return {}
         try:
             return json.loads(factors_str)
         except json.JSONDecodeError:
-            self.logger.error(f"转换系数格式错误: {factors_str}，使用默认系数")
+            self.logger.error(f"转换系数格式错误: {factors_str}，将使用默认系数1.0")
             return {}
 
     def _collect_device_data(self, device_id: str) -> dict:
-        """收集设备数据"""
+        """收集设备所有属性数据"""
         device_data = self.matched_devices[device_id]
         device_config = device_data["config"]
         device_type = device_config["type"]
@@ -159,8 +180,8 @@ class HAto163Gateway:
         # 解析转换系数
         factors_str = device_config.get("conversion_factors", "")
         conversion_factors = self._parse_conversion_factors(factors_str)
-        self.logger.debug(f"设备 {device_id} 转换系数: {conversion_factors}")
 
+        # 构建推送 payload
         payload = {
             "id": int(time.time() * 1000),
             "version": "1.0",
@@ -170,18 +191,19 @@ class HAto163Gateway:
         for prop, entity_id in entities.items():
             value = self._get_entity_value(entity_id, device_type)
             if value is not None:
-                # state字段不应用转换系数
+                # 状态属性不应用转换系数
                 if prop == "state":
                     payload["params"][prop] = value
-                    self.logger.info(f"  收集到 {prop} = {value}（不转换，实体: {entity_id}）")
+                    self.logger.info(f"  收集到 {prop} = {value}（实体: {entity_id}）")
                 else:
                     # 应用转换系数
                     factor = conversion_factors.get(prop, 1.0)
                     converted_value = value * factor
-                    # 按属性类型保留小数
+                    
+                    # 根据属性类型保留小数位数
                     if prop in ("current", "active_power"):
                         converted_value = round(converted_value, 3)
-                    elif prop in ("voltage", "temp", "hum", "frequency", "co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum"):
+                    elif prop in ("voltage", "temp", "hum", "frequency", "co2", "pm2_5", "pm10", "tvoc", "noise"):
                         converted_value = round(converted_value, 1)
                     elif prop == "energy":
                         converted_value = round(converted_value, 4)
@@ -196,7 +218,7 @@ class HAto163Gateway:
         return payload
 
     def _push_device_data(self, device_id: str) -> bool:
-        """推送设备数据到网易IoT平台"""
+        """推送单设备数据到网易IoT平台"""
         device_data = self.matched_devices[device_id]
         device_config = device_data["config"]
 
@@ -205,11 +227,11 @@ class HAto163Gateway:
             self.logger.warning(f"设备 {device_id} 无有效数据，跳过推送")
             return False
         
-        self.logger.info(f"设备 {device_id} 推送可用数据: {payload['params'].keys()}")
+        self.logger.info(f"设备 {device_id} 准备推送数据: {payload['params'].keys()}")
         return self.mqtt_client.publish(device_config, payload)
 
     def _push_device_with_timeout(self, device_id: str, timeout: int) -> bool:
-        """带超时的设备推送包装函数（供线程调用）"""
+        """带超时控制的设备推送（供线程调用）"""
         def push_task():
             return self._push_device_data(device_id)
         
@@ -224,20 +246,22 @@ class HAto163Gateway:
         return True
 
     def start(self):
-        """启动服务"""
-        self.logger.info("===== HA to 163 Gateway 启动 =====")
+        """启动网关服务主流程"""
+        self.logger.info("===== HA to 163 Gateway 服务启动 =====")
 
-        # 启动延迟
+        # 启动延迟（等待依赖服务就绪）
         startup_delay = self.config.get("startup_delay", 30)
         self.logger.info(f"启动延迟 {startup_delay} 秒...")
         time.sleep(startup_delay)
 
         # 等待HA就绪
         if not self._wait_for_ha_ready():
+            self.logger.error("HA未就绪，服务启动失败")
             return
 
         # 连接MQTT broker
         if not self.mqtt_client.connect():
+            self.logger.error("MQTT连接失败，服务启动失败")
             return
 
         # 初始设备发现
@@ -245,30 +269,18 @@ class HAto163Gateway:
             self.logger.error("未匹配到任何设备，服务启动失败")
             return
 
-        # 主循环
+        # 启动主循环
         self._run_loop()
-        
-    def _stop(self, signum, frame):
-        self.logger.info("收到停止信号，正在退出...")
-        self.running = False
-        # 关闭线程池
-        if self.executor:
-            self.executor.shutdown(wait=False, cancel_futures=True)
-        # 断开MQTT连接
-        if hasattr(self, 'mqtt_client') and self.mqtt_client:
-            self.mqtt_client.disconnect()
-        # 关闭HTTP会话（新增，释放资源）
-        if hasattr(self, 'ha_session'):
-            self.ha_session.close()
+        self.logger.info("服务已正常退出")
 
     def _run_loop(self):
-        """主循环（异步推送实现）"""
+        """服务主循环（定时发现设备和推送数据）"""
         push_interval = self.config.get("wy_push_interval", 60)
         discovery_interval = self.config.get("ha_discovery_interval", 300)
         last_discovery = time.time()
         last_push = time.time()
         
-        # 初始化线程池
+        # 初始化线程池（根据设备数量动态调整）
         max_workers = min(len(self.matched_devices), 10) if self.matched_devices else 1
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="DevicePush")
 
@@ -280,12 +292,14 @@ class HAto163Gateway:
                 self.logger.info("执行定时设备发现...")
                 self._discover_devices()
                 last_discovery = now
+                
                 # 动态调整线程池大小
-                max_workers = min(len(self.matched_devices), 10) if self.matched_devices else 1
-                # 关闭旧线程池，创建新线程池
-                if self.executor:
+                new_max_workers = min(len(self.matched_devices), 10) if self.matched_devices else 1
+                if new_max_workers != max_workers:
+                    self.logger.info(f"线程池大小调整: {max_workers} → {new_max_workers}")
                     self.executor.shutdown(wait=False)
-                self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="DevicePush")
+                    self.executor = ThreadPoolExecutor(max_workers=new_max_workers, thread_name_prefix="DevicePush")
+                    max_workers = new_max_workers
 
             # 定时异步推送数据
             if now - last_push >= push_interval:
@@ -295,8 +309,8 @@ class HAto163Gateway:
                 # 提交所有设备推送任务
                 for device_id in self.matched_devices:
                     future = self.executor.submit(
-                        self._push_device_with_timeout, 
-                        device_id, 
+                        self._push_device_with_timeout,
+                        device_id,
                         timeout=60  # 单个设备推送超时
                     )
                     futures.append((device_id, future))
@@ -304,8 +318,7 @@ class HAto163Gateway:
                 # 处理推送结果
                 for device_id, future in futures:
                     try:
-                        # 等待任务结果（设置略长于单个设备超时）
-                        result = future.result(timeout=65)
+                        result = future.result(timeout=65)  # 等待结果超时（略长于单个设备超时）
                         if result:
                             self.logger.info(f"设备 {device_id} 异步推送完成")
                         else:
@@ -315,15 +328,17 @@ class HAto163Gateway:
 
                 last_push = now
 
-            time.sleep(1)
+            time.sleep(1)  # 降低CPU占用
 
 
 if __name__ == "__main__":
     import os
+    # 配置日志
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+    # 启动网关服务
     gateway = HAto163Gateway()
     gateway.start()
     
