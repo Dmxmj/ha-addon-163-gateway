@@ -3,8 +3,9 @@ import re
 import logging
 import time
 import threading
+import json
 from typing import Dict, List
-from .base_discovery import BaseDiscovery  # 假设基础类来自base_discovery.py
+from .base_discovery import BaseDiscovery  # 基础发现类
 
 
 # 完整属性映射表：覆盖环境传感器与电气设备所有参数
@@ -86,13 +87,15 @@ class HADiscovery(BaseDiscovery):
     """Home Assistant设备发现类：支持环境传感器、开关、插座、断路器等设备"""
 
     def __init__(self, config: Dict[str, any], ha_headers: Dict[str, str], ha_session: requests.Session):
-        super().__init__(config, module_name="ha_discovery")
+        # 修复：父类BaseDiscovery不接受module_name参数，只传递config
+        super().__init__(config)
+        
         # 基础配置
         self.ha_url = config.get("ha_url").rstrip("/")  # 去除URL末尾斜杠，避免拼接错误
         self.ha_headers = ha_headers
         self.ha_session = ha_session  # 复用HTTP会话，减少连接开销
         self.entities: List[Dict[str, any]] = []  # 存储HA所有实体
-        self.logger = logging.getLogger("ha_discovery")
+        self.logger = logging.getLogger("ha_discovery")  # 直接初始化日志器
 
         # 设备分类配置
         self.sub_devices = [d for d in config.get("sub_devices", []) if d.get("enabled", True)]
@@ -409,3 +412,4 @@ class HADiscovery(BaseDiscovery):
                 self.logger.info(f"  实体映射：{entities}")
 
         self.logger.info("\n" + "=" * 60)
+    
