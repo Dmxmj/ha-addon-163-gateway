@@ -12,24 +12,24 @@ from device_discovery.ha_discovery import HADiscovery
 
 class HAto163Gateway:
     def __init__(self):
-        # 1. 加载配置（优先初始化，其他模块依赖配置）
+        # 1. 加载配置（优先初始化）
         self.config_loader = ConfigLoader()
         self.config = self.config_loader.config
         self.logger = logging.getLogger("ha_to_163")
 
-        # 2. 初始化HA请求头（必须在会话之前）
+        # 2. 初始化HA请求头（在会话之前）
         self.ha_headers = {
             "Authorization": f"Bearer {self.config['ha_token']}",
             "Content-Type": "application/json"
         }
 
-        # 3. 创建HTTP会话（复用连接，需在headers之后）
+        # 3. 创建HTTP会话（复用连接）
         self.ha_session = requests.Session()
         self.ha_session.headers.update(self.ha_headers)
 
-        # 4. 设备与MQTT客户端初始化
+        # 4. 设备与MQTT客户端初始化（修复：MQTTClient只传config参数）
         self.matched_devices = {}
-        self.mqtt_client = MQTTClient(self.config, self.ha_session)  # 传递会话供MQTT使用
+        self.mqtt_client = MQTTClient(self.config)  # 移除多余的ha_session参数
         self.running = True
         self.executor = None  # 线程池实例
 
@@ -83,7 +83,7 @@ class HAto163Gateway:
     def _discover_devices(self) -> bool:
         """执行设备发现，匹配HA实体与子设备"""
         try:
-            # 关键修复：传递三个必要参数（config, headers, session）
+            # 正确传递HADiscovery所需的三个参数
             discovery = HADiscovery(
                 self.config,
                 self.ha_headers,
