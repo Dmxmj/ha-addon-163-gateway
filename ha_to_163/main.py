@@ -140,6 +140,16 @@ class HAto163Gateway:
                         if device_type == "sensor" and entity_id.startswith("binary_sensor."):
                             return 1 if state == "on" else 0
 
+                        # 修复：充电状态文本转数值（正在充电→1，未充电→0）
+                        if "charging_state" in property_name:
+                            if state == "正在充电":
+                                return 1.0
+                            elif state == "未充电":
+                                return 0.0
+                            else:
+                                logger.warning(f"未知充电状态: {state}（实体: {entity_id}）")
+                                return None
+
                         # 提取数值型状态
                         import re
                         match = re.search(r'[-+]?\d*\.\d+|\d+', state)
