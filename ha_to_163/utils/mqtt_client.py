@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 
 class MQTTClient:
-    """MQ    MQTT客户端，支持新属性上报和设备控制功能
+    """MQTT客户端，支持新属性上报和设备控制功能
     支持与网易IoT平台的通信，处理设备下发指令并状态上报
     """
     
@@ -226,7 +226,7 @@ class MQTTClient:
                 return
 
             entities = resp.json()
-            # 筛选符合前缀且类型为switch的实体（修复实体类型匹配问题）
+            # 筛选符合前缀且类型为switch的实体
             target_entity_type = "switch"
             candidate_entities = [
                 e["entity_id"] for e in entities
@@ -234,108 +234,75 @@ class MQTTClient:
                 and e["entity_id"].startswith(f"{target_entity_type}.")
             ]
 
-            if candidate_entities:
-                matched_entity = candidate_entities[0]
-                self.logger.info(f"匹配到控制实体: {matched_entity}")
-            else:
-                self.logger.error(f"未找到前缀为'{entity_prefix}'的{target_entity_type}类型实体")
+            if not candidate_entities:
+                self.logger.error(f"未找到匹配的{target_entity_type}实体，前缀: {entity_prefix}")
                 self._send_control_reply(
                     product_key, device_name, command_id,
-                    success=False, error_msg="未找到控制实体"
+                    success=False, error_msg="未找到匹配实体"
                 )
                 return
 
-        except Exception as e:
-            self.logger.error(f"查询实体异常: {e}")
-            self._send_control_reply(
-                product_key, device_name, command_id,
-                success=False, error_msg=f"查询异常: {str(e)}"
-            )
-            return
+            # 取第一个匹配的实体进行控制
+            matched_entity = candidate_entities[0]
+            self.logger.info(f"匹配到实体: {matched_entity}，执行状态切换: {ha_state}")
 
-        try:
             # 发送控制指令到HA
-            response = requests.post(
+            control_resp = requests.post(
                 f"{self.config['ha_url']}/api/services/switch/turn_{ha_state}",
                 headers=self.ha_headers,
                 json={"entity_id": matched_entity},
                 timeout=10
             )
 
-            if response.status_code == 200:
-                self.logger.info(f"控制成功: {matched_entity} → {ha_state}")
-                actual_state = 1 if ha_state == "on" else 0
+            if control_resp.status_code in (200, 201):
+                self.logger.info(f"实体{matched_entity}控制成功")
                 self._send_control_reply(
                     product_key, device_name, command_id,
-                    success=True, result_data={"state": actual_state}
+                    success=True
                 )
-                self._report_state(device, actual_state)  # 主动上报控制后的状态
             else:
-                self.logger.error(f"控制失败，状态码: {response.status_code}")
+                self.logger.error(f"实体{matched_entity}控制失败，状态码: {control_resp.status_code}")
                 self._send_control_reply(
                     product_key, device_name, command_id,
-                    success=False, error_msg=f"控制失败，状态码: {response.status_code}"
+                    success=False, error_msg="控制指令执行失败"
                 )
+
         except Exception as e:
-            self.logger.error(f"控制设备异常: {e}")
+            self.logger.error(f"控制设备失败: {str(e)}")
             self._send_control_reply(
                 product_key, device_name, command_id,
-                success=False, error_msg=f"控制异常: {str(e)}"
+                success=False, error_msg=f"控制失败: {str(e)}"
             )
     
-    def _send_control_reply(self, product_key: str, device_name: str, command_id: int,
-                           success: bool, error_msg: str = None, result_data: dict = None):
+    def _send_control_reply(self, product_key: str, device_name: str, command_id: int, 
+                           success: bool, error_msg: str = ""):
         """发送控制指令的回复消息"""
-        reply_topic = f"sys/{product_key}/{device_name}/service/CommonService_reply"
+        reply_topic = f"sys/{product_key}/{device_name}/thing/service/property/set_reply"
         reply_payload = {
             "id": command_id,
-            "version": "1.0",
             "code": 200 if success else 500,
-            "message": "success" if success else error_msg,
-            "data": result_data or {}
+            "msg": "success" if success else error_msg,
+            "data": {}
         }
+        self.client.publish(reply_topic, json.dumps(reply_payload), qos=1)
+        self.logger.info(f"发送控制回复: {reply_topic} → {json.dumps(reply_payload)}")
+    
+    def publish(self, device_config: Dict[str, Any], payload: Dict[str, Any]) -> bool:
+        """发布设备属性数据到MQTT服务器"""
+        if not self.connected:
+            self.logger.error("MQTT未连接，无法发布数据")
+            return False
         
         try:
-            if self.connected:
-                result = self.client.publish(reply_topic, json.dumps(reply_payload), qos=1)
-                if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                    self.logger.info(f"回复成功: {reply_topic} → {json.dumps(reply_payload)}")
-                else:
-                    self.logger.error(f"回复失败（MQTT错误码: {result.rc}）: {reply_topic}")
-            else:
-                self.logger.error("MQTT未连接，无法发送回复")
-        except Exception as e:
-            self.logger.error(f"发送回复异常: {e}")
-    
-    def _report_state(self, device: dict, state: int):
-        """控制后主动上报设备状态"""
-        try:
-            topic = f"sys/{device['product_key']}/{device['device_name']}/event/property/post"
-            payload = {
-                "id": int(time.time() * 1000),
-                "version": "1.0",
-                "params": {"state": state}
-            }
-            self.publish(device, payload)
-        except Exception as e:
-            self.logger.error(f"上报控制状态失败: {e}")
-    
-    def publish(self, device: dict, payload: dict) -> bool:
-        """发布设备属性数据到MQTT主题"""
-        try:
-            if not self.connected:
-                self.logger.error("MQTT未连接，发布失败")
-                return False
-            
-            topic = f"sys/{device['product_key']}/{device['device_name']}/event/property/post"
+            topic = f"sys/{device_config['product_key']}/{device_config['device_name']}/thing/event/property/post"
+            self.logger.debug(f"发布数据到Topic: {topic}，Payload: {payload}")
             result = self.client.publish(topic, json.dumps(payload), qos=1)
-            
-            if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                self.logger.info(f"数据发布成功: {topic} → {json.dumps(payload)}")
-                return True
-            else:
-                self.logger.error(f"数据发布失败（MQTT错误码: {result.rc}）: {topic}")
+            result.wait_for_publish(timeout=5)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                self.logger.error(f"数据发布失败，错误码: {result.rc}")
                 return False
+            self.logger.info(f"设备{device_config['id']}数据发布成功")
+            return True
         except Exception as e:
-            self.logger.error(f"发布数据异常: {e}")
+            self.logger.error(f"发布数据异常: {str(e)}")
             return False
