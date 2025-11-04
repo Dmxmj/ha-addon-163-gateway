@@ -51,7 +51,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}  # PR时不推送，仅构建
           platforms: |
             linux/amd64
-            linux/arm/v7  # 移除注释，仅保留纯平台标识符
             linux/arm64
             linux/386
           tags: ${{ steps.meta.outputs.tags }}
