@@ -51,9 +51,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}  # PR时不推送，仅构建
           platforms: |
             linux/amd64
-            linux/arm/v7  # 对应armv7
-            linux/arm64   # 对应aarch64
-            linux/386     # 对应i386
+            linux/arm/v7  # 移除注释，仅保留纯平台标识符
+            linux/arm64
+            linux/386
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha  # 缓存构建依赖，加速下次构建
