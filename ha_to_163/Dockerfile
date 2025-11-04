@@ -1,35 +1,36 @@
-FROM alpine:3.18
-
-# 设置环境变量
-ENV PYTHONUNBUFFERED=1
+# 基于Home Assistant官方基础镜像（适配多架构）
+ARG BUILD_FROM
+FROM ${BUILD_FROM}
 
 # 设置工作目录
 WORKDIR /app
 
-# 安装 Python 和构建依赖
+# 安装系统依赖（补全必要工具）
 RUN apk add --no-cache \
     python3 \
     py3-pip \
-    ca-certificates \
-    curl \
+    py3-setuptools \
+    py3-wheel \
     gcc \
     python3-dev \
-    musl-dev
+    musl-dev \
+    linux-headers \
+    ntpdate  # 用于NTP时间同步
 
-# 使用阿里云源安装依赖（HTTP + trusted-host）
-RUN python3 -m pip install --no-cache-dir \
-    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
-    --extra-index-url https://pypi.org/simple \
-    paho-mqtt>=1.6.1 \
-    requests>=2.31.0 \
-    pyyaml>=6.0.1 \
-    ntplib>=0.3.0
+# 复制依赖清单
+COPY requirements.txt .
 
-# 复制代码
+# 安装Python依赖（使用国内源加速，避免超时）
+RUN pip3 install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+
+# 复制插件所有文件
 COPY . .
 
-# 可执行权限
-RUN chmod +x /app/main.py || true
+# 给启动脚本添加可执行权限
+RUN chmod +x /app/run.sh
 
-# 启动
-CMD ["python3", "/app/main.py"]
+# 暴露日志输出（可选）
+ENV PYTHONUNBUFFERED=1
+
+# 启动命令
+CMD ["/app/run.sh"]
