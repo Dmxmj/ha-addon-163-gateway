@@ -1,6 +1,6 @@
 {
     "name": "HA to 163 Gateway",
-    "version": "0.1.21",
+    "version": "0.1.22",  // 同步版本号
     "slug": "ha_to_163",
     "description": "将Home Assistant设备数据推送到网易IoT平台，支持电气参数调整和频率监测",
     "arch": [
@@ -12,7 +12,7 @@
     "url": "https://github.com/Dmxmj/ha-addon-163-gateway",
     "startup": "application",
     "boot": "auto",
-    "image": "ghcr.io/dmxmj/ha-addon-163-gateway",
+    "image": "ghcr.io/dmxmj/ha-addon-163-gateway:0.1.22",  // 明确指定版本标签
     "options": {
         "ha_url": "http://homeassistant:8123",
         "ha_token": "",
@@ -27,7 +27,7 @@
                 "device_name": "",
                 "device_secret": "",
                 "ha_entity_prefix": "",
-                "supported_properties": ["temp", "hum", "batt", "smoke", "co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum"],
+                "supported_properties": ["temp", "hum", "batt", "smoke", "co2", "pm2_5", "pm10", "tvoc", "noise", "relative_hum", "charging_state"],
                 "enabled": false,
                 "type": "sensor",
                 "conversion_factors": ""
