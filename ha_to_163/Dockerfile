@@ -1,21 +1,23 @@
 FROM alpine:3.18
 
-# 安装Python和必要工具
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装 Python 和构建依赖
 RUN apk add --no-cache \
     python3 \
     py3-pip \
+    ca-certificates \
+    curl \
     gcc \
     python3-dev \
-    musl-dev && \
-    rm -rf /var/cache/apk/*
+    musl-dev
 
-WORKDIR /app
-
-# 复制依赖文件
-COPY requirements.txt .
-
-# 使用多源安装（优先国内源，提高成功率）
-RUN pip3 install --no-cache-dir \
+# 使用阿里云源安装依赖（HTTP + trusted-host）
+RUN python3 -m pip install --no-cache-dir \
     --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     --extra-index-url https://pypi.org/simple \
     paho-mqtt>=1.6.1 \
@@ -23,12 +25,11 @@ RUN pip3 install --no-cache-dir \
     pyyaml>=6.0.1 \
     ntplib>=0.3.0
 
-# 验证关键依赖安装
-RUN pip3 list | grep -E "requests|paho-mqtt|pyyaml|ntplib"
-
-# 复制应用文件
+# 复制代码
 COPY . .
 
-# 启动命令（直接运行Python主程序）
+# 可执行权限
+RUN chmod +x /app/main.py || true
+
+# 启动
 CMD ["python3", "/app/main.py"]
-    
