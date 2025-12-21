@@ -1,35 +1,32 @@
 FROM alpine:3.18
 
-# 设置环境变量
-ENV PYTHONUNBUFFERED=1
-
-# 设置工作目录
-WORKDIR /app
-
-# 安装 Python 和构建依赖
+# 安装Python、构建依赖及SSL证书（新增ca-certificates）
 RUN apk add --no-cache \
     python3 \
     py3-pip \
-    ca-certificates \
-    curl \
     gcc \
     python3-dev \
-    musl-dev
+    musl-dev \
+    ca-certificates && \  # 支持SSL证书验证
+    rm -rf /var/cache/apk/*
 
-# 使用阿里云源安装依赖（HTTP + trusted-host）
-RUN python3 -m pip install --no-cache-dir \
+WORKDIR /app
+
+# 复制依赖文件并按固定版本安装
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir \
     --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     --extra-index-url https://pypi.org/simple \
-    paho-mqtt>=1.6.1 \
-    requests>=2.31.0 \
-    pyyaml>=6.0.1 \
-    ntplib>=0.3.0
+    -r requirements.txt  # 直接使用requirements.txt确保版本一致
 
-# 复制代码
+# 验证版本是否匹配（精确检查）
+RUN grep -E "paho-mqtt==|requests==|ntplib==" requirements.txt | while read -r line; do \
+    if ! pip3 list | grep -q "$line"; then \
+        echo "依赖版本不匹配: $line"; \
+        exit 1; \
+    fi; \
+done
+
 COPY . .
 
-# 可执行权限
-RUN chmod +x /app/main.py || true
-
-# 启动
 CMD ["python3", "/app/main.py"]
