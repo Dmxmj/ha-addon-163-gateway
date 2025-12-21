@@ -1,21 +1,12 @@
-#!/bin/bash
+#!/bin/sh
+set -e
 
-# 设置日志级别
-LOG_LEVEL=${LOG_LEVEL:-info}
+# 再次确认依赖
+echo "验证依赖是否安装..."
+if ! python3 -c "import requests"; then
+    echo "紧急安装 requests..."
+    pip3 install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple requests==2.31.0
+fi
 
-# 转换日志级别为Python可用格式
-case "$LOG_LEVEL" in
-  "debug") LOG_LEVEL_PYTHON="DEBUG" ;;
-  "info") LOG_LEVEL_PYTHON="INFO" ;;
-  "warning") LOG_LEVEL_PYTHON="WARNING" ;;
-  "error") LOG_LEVEL_PYTHON="ERROR" ;;
-  "critical") LOG_LEVEL_PYTHON="CRITICAL" ;;
-  *) LOG_LEVEL_PYTHON="INFO" ;;
-esac
-
-# 设置环境变量
-export LOG_LEVEL=$LOG_LEVEL_PYTHON
-
-# 启动应用
-python main.py
-    
+echo "===== HA to 163 Gateway 启动 ====="
+python3 /app/main.py
