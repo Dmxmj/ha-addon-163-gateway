@@ -83,23 +83,22 @@ class HAto163Gateway:
     def _discover_devices(self) -> bool:
         """执行设备发现，匹配HA实体与子设备"""
         try:
-            # 正确传递HADiscovery所需的三个参数
+            # HADiscovery只需要config和ha_headers两个参数
             discovery = HADiscovery(
                 self.config,
-                self.ha_headers,
-                self.ha_session
+                self.ha_headers
             )
             new_matched_devices = discovery.discover()
 
             # 记录新增实体
             for device_id, new_data in new_matched_devices.items():
                 old_data = self.matched_devices.get(device_id, {})
-                old_entities = old_data.get("entities", {})
-                new_entities = new_data.get("entities", {})
-                added_entities = {k: v for k, v in new_entities.items() if k not in old_entities}
+                old_sensors = old_data.get("sensors", {})
+                new_sensors = new_data.get("sensors", {})
+                added_sensors = {k: v for k, v in new_sensors.items() if k not in old_sensors}
                 
-                if added_entities:
-                    self.logger.info(f"设备 {device_id} 新增匹配实体: {added_entities}")
+                if added_sensors:
+                    self.logger.info(f"设备 {device_id} 新增匹配实体: {added_sensors}")
 
             self.matched_devices = new_matched_devices
             return len(self.matched_devices) > 0
@@ -175,7 +174,8 @@ class HAto163Gateway:
         device_data = self.matched_devices[device_id]
         device_config = device_data["config"]
         device_type = device_config["type"]
-        entities = device_data["entities"]
+        # 兼容sensors和entities两种键名
+        entities = device_data.get("sensors", device_data.get("entities", {}))
         
         # 解析转换系数
         factors_str = device_config.get("conversion_factors", "")
