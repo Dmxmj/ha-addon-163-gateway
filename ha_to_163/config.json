@@ -15,7 +15,6 @@
     "init": false,
     "hassio_api": true,
     "homeassistant_api": true,
-    "image": "ghcr.io/dmxmj/ha-addon-163-gateway",
     "options": {
         "ha_url": "http://homeassistant:8123",
         "ha_token": "",
