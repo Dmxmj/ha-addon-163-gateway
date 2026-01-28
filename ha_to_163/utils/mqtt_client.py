@@ -14,6 +14,9 @@ class MQTTClient:
     支持与网易IoT平台的通信，处理设备下发指令并状态上报
     """
     
+    # 最大连接失败次数，超过后触发程序重启
+    MAX_CONNECT_FAILURES = 10
+    
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger("mqtt_client")
@@ -25,10 +28,16 @@ class MQTTClient:
         self._reconnect_thread: threading.Thread = None  # 重连线程
         self._stop_flag = False  # 停止标志
         self._lock = threading.Lock()  # 线程锁
+        self._connect_failure_count = 0  # 连接失败计数器
+        self._restart_callback = None  # 重启回调函数
         self.ha_headers = {
             "Authorization": f"Bearer {self.config['ha_token']}",
             "Content-Type": "application/json"
         }
+    
+    def set_restart_callback(self, callback):
+        """设置重启回调函数，当连接失败次数超过阈值时调用"""
+        self._restart_callback = callback
     
     def _init_mqtt_client(self, force_sync: bool = False):
         """初始化MQTT客户端，设置认证信息和回调函数
@@ -140,7 +149,8 @@ class MQTTClient:
         if rc == 0:
             self.connected = True
             self.reconnect_delay = 1  # 重置重连延迟
-            self.logger.info(f"MQTT连接成功（返回码: {rc}）")
+            self._connect_failure_count = 0  # 重置失败计数
+            self.logger.info(f"MQTT连接成功（返回码: {rc}），失败计数已重置")
             
             # 订阅所有子设备的控制主题
             for device in self.config.get("sub_devices", []):
@@ -156,8 +166,14 @@ class MQTTClient:
                 self.logger.info(f"订阅控制Topic: {common_topic}")
         else:
             self.connected = False
-            self.logger.error(f"MQTT连接失败（返回码: {rc}）")
-            self._schedule_reconnect()
+            self._connect_failure_count += 1
+            self.logger.error(f"MQTT连接失败（返回码: {rc}），当前失败次数: {self._connect_failure_count}/{self.MAX_CONNECT_FAILURES}")
+            
+            # 检查是否需要触发重启
+            if self._connect_failure_count >= self.MAX_CONNECT_FAILURES:
+                self._trigger_restart("连接失败次数超过阈值")
+            else:
+                self._schedule_reconnect()
     
     def _on_disconnect(self, client: mqtt.Client, userdata: Any, rc: int):
         """断开连接回调函数"""
@@ -173,6 +189,24 @@ class MQTTClient:
             self._schedule_reconnect()  # 异常断开时自动重连
         else:
             self.logger.info("MQTT连接正常关闭")
+    
+    def _trigger_restart(self, reason: str):
+        """触发程序重启"""
+        self.logger.error(f"触发程序重启: {reason}")
+        self.logger.info(f"当前连接失败次数: {self._connect_failure_count}，将退出程序等待自动重启...")
+        
+        # 如果设置了重启回调，调用它
+        if self._restart_callback:
+            try:
+                self._restart_callback(reason)
+            except Exception as e:
+                self.logger.error(f"重启回调执行失败: {e}")
+        
+        # 退出程序，依赖Docker的restart策略自动重启
+        import os
+        import sys
+        self.logger.info("程序即将退出...")
+        os._exit(1)  # 强制退出，确保Docker能捕获到退出状态并重启
     
     def _schedule_reconnect(self):
         """计划重连（指数退避策略，非阻塞方式）"""
@@ -238,7 +272,7 @@ class MQTTClient:
             if self._stop_flag:
                 return
             
-            self.logger.info(f"正在尝试重连（第 {attempt}/{max_retries} 次）...")
+            self.logger.info(f"正在尝试重连（第 {attempt}/{max_retries} 次），总失败次数: {self._connect_failure_count}/{self.MAX_CONNECT_FAILURES}")
             
             try:
                 # 重新初始化客户端（强制同步时间并生成新密码）
@@ -261,12 +295,26 @@ class MQTTClient:
                 if self.connected:
                     self.logger.info("MQTT重连成功！")
                     self.reconnect_delay = 1  # 重置重连延迟
+                    self._connect_failure_count = 0  # 重置失败计数
                     return
                 else:
-                    self.logger.warning(f"重连尝试 {attempt} 未成功，等待下一次尝试...")
+                    # 连接未成功，增加失败计数（回调中也会增加，但这里处理超时情况）
+                    self._connect_failure_count += 1
+                    self.logger.warning(f"重连尝试 {attempt} 未成功，当前总失败次数: {self._connect_failure_count}/{self.MAX_CONNECT_FAILURES}")
+                    
+                    # 检查是否需要触发重启
+                    if self._connect_failure_count >= self.MAX_CONNECT_FAILURES:
+                        self._trigger_restart("重连失败次数超过阈值")
+                        return
                     
             except Exception as e:
-                self.logger.error(f"重连尝试 {attempt} 失败: {e}")
+                self._connect_failure_count += 1
+                self.logger.error(f"重连尝试 {attempt} 失败: {e}，当前总失败次数: {self._connect_failure_count}/{self.MAX_CONNECT_FAILURES}")
+                
+                # 检查是否需要触发重启
+                if self._connect_failure_count >= self.MAX_CONNECT_FAILURES:
+                    self._trigger_restart("重连异常次数超过阈值")
+                    return
             
             # 每次重试前等待一段时间
             if attempt < max_retries:
