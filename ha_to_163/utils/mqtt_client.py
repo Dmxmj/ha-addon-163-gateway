@@ -30,12 +30,16 @@ class MQTTClient:
             "Content-Type": "application/json"
         }
     
-    def _init_mqtt_client(self):
-        """初始化MQTT客户端，设置认证信息和回调函数"""
+    def _init_mqtt_client(self, force_sync: bool = False):
+        """初始化MQTT客户端，设置认证信息和回调函数
+        
+        Args:
+            force_sync: 是否强制同步NTP时间（用于重连场景）
+        """
         try:
             client_id = self.config["gateway_device_name"]
             username = self.config["gateway_product_key"]
-            password = self._generate_mqtt_password(self.config["gateway_device_secret"])
+            password = self._generate_mqtt_password(self.config["gateway_device_secret"], force_sync=force_sync)
             
             self.client = mqtt.Client(client_id=client_id, clean_session=True, protocol=mqtt.MQTTv311)
             self.client.username_pw_set(username=username, password=password)
@@ -52,16 +56,21 @@ class MQTTClient:
             self.logger.error(f"MQTT客户端初始化失败: {e}")
             raise
     
-    def _generate_mqtt_password(self, device_secret: str) -> str:
-        """生成MQTT连接密码（基于HMAC-SHA256的动态令牌）"""
+    def _generate_mqtt_password(self, device_secret: str, force_sync: bool = False) -> str:
+        """生成MQTT连接密码（基于HMAC-SHA256的动态令牌）
+        
+        Args:
+            device_secret: 设备密钥
+            force_sync: 是否强制同步NTP时间（用于重连场景）
+        """
         try:
-            # 每5分钟同步一次时间
-            if time.time() - self.last_time_sync > 300:
+            # 强制同步或每5分钟同步一次时间
+            if force_sync or (time.time() - self.last_time_sync > 300):
                 self._sync_time()
             
             timestamp = int(time.time())
             counter = timestamp // 300  # 每5分钟更新一次计数器
-            self.logger.debug(f"当前counter: {counter}（时间戳: {timestamp}）")
+            self.logger.info(f"生成密码 - counter: {counter}，时间戳: {timestamp}")
             
             counter_bytes = str(counter).encode('utf-8')
             secret_bytes = device_secret.encode('utf-8')
@@ -89,6 +98,11 @@ class MQTTClient:
     
     def connect(self) -> bool:
         """连接到MQTT服务器"""
+        # 重置停止标志，允许重连
+        self._stop_flag = False
+        with self._lock:
+            self._reconnect_pending = False
+        
         self._init_mqtt_client()
         try:
             # 根据SSL配置选择端口
@@ -97,9 +111,9 @@ class MQTTClient:
             self.client.connect(self.config["wy_mqtt_broker"], port, keepalive=60)
             self.client.loop_start()  # 启动网络循环线程
             
-            # 等待连接成功（超时10秒）
+            # 等待连接成功（超时15秒）
             start_time = time.time()
-            while not self.connected and (time.time() - start_time) < 10:
+            while not self.connected and (time.time() - start_time) < 15:
                 time.sleep(0.1)
             
             return self.connected
@@ -148,8 +162,14 @@ class MQTTClient:
     def _on_disconnect(self, client: mqtt.Client, userdata: Any, rc: int):
         """断开连接回调函数"""
         self.connected = False
+        
+        # 如果是用户主动断开，不触发重连
+        if self._stop_flag:
+            self.logger.info("MQTT连接已正常关闭（用户主动断开）")
+            return
+        
         if rc != 0:
-            self.logger.warning(f"MQTT断开连接（返回码: {rc}）")
+            self.logger.warning(f"MQTT异常断开（返回码: {rc}），将自动重连...")
             self._schedule_reconnect()  # 异常断开时自动重连
         else:
             self.logger.info("MQTT连接正常关闭")
@@ -221,8 +241,8 @@ class MQTTClient:
             self.logger.info(f"正在尝试重连（第 {attempt}/{max_retries} 次）...")
             
             try:
-                # 重新初始化客户端（会生成新的密码）
-                self._init_mqtt_client()
+                # 重新初始化客户端（强制同步时间并生成新密码）
+                self._init_mqtt_client(force_sync=True)
                 
                 # 获取连接参数
                 port = self.config["wy_mqtt_port_ssl"] if self.config.get("use_ssl") else self.config["wy_mqtt_port_tcp"]
