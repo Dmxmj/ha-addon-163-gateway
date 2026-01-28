@@ -5,11 +5,12 @@ import hmac
 import hashlib
 import json
 import requests
+import threading
 from typing import Dict, Any
 
 
 class MQTTClient:
-    """MQ    MQTT客户端，支持新属性上报和设备控制功能
+    """MQTT客户端，支持新属性上报和设备控制功能
     支持与网易IoT平台的通信，处理设备下发指令并状态上报
     """
     
@@ -20,6 +21,10 @@ class MQTTClient:
         self.connected = False
         self.last_time_sync = 0
         self.reconnect_delay = 1
+        self._reconnect_pending = False  # 重连标志位
+        self._reconnect_thread: threading.Thread = None  # 重连线程
+        self._stop_flag = False  # 停止标志
+        self._lock = threading.Lock()  # 线程锁
         self.ha_headers = {
             "Authorization": f"Bearer {self.config['ha_token']}",
             "Content-Type": "application/json"
@@ -104,9 +109,15 @@ class MQTTClient:
     
     def disconnect(self):
         """断开MQTT连接"""
+        self._stop_flag = True  # 设置停止标志，阻止重连
+        with self._lock:
+            self._reconnect_pending = False
         if self.client:
-            self.client.loop_stop()
-            self.client.disconnect()
+            try:
+                self.client.loop_stop()
+                self.client.disconnect()
+            except Exception as e:
+                self.logger.warning(f"断开连接时出现异常: {e}")
             self.connected = False
             self.logger.info("MQTT连接已断开")
     
@@ -144,12 +155,113 @@ class MQTTClient:
             self.logger.info("MQTT连接正常关闭")
     
     def _schedule_reconnect(self):
-        """计划重连（指数退避策略）"""
-        if self.reconnect_delay < 60:
-            self.reconnect_delay *= 2  # 重连延迟翻倍（最大60秒）
-        self.logger.info(f"{self.reconnect_delay}秒后尝试重连...")
-        time.sleep(self.reconnect_delay)
-        self.connect()
+        """计划重连（指数退避策略，非阻塞方式）"""
+        # 检查是否已停止或已有重连任务
+        if self._stop_flag:
+            self.logger.info("服务已停止，取消重连")
+            return
+        
+        with self._lock:
+            if self._reconnect_pending:
+                self.logger.debug("已有重连任务在执行，跳过")
+                return
+            self._reconnect_pending = True
+        
+        # 在单独的线程中执行重连，避免阻塞回调
+        def reconnect_task():
+            try:
+                # 指数退避延迟
+                delay = min(self.reconnect_delay, 60)
+                self.logger.info(f"{delay}秒后尝试重连...")
+                
+                # 分段睡眠，以便能快速响应停止信号
+                for _ in range(int(delay)):
+                    if self._stop_flag:
+                        self.logger.info("重连任务被取消")
+                        return
+                    time.sleep(1)
+                
+                if self._stop_flag:
+                    return
+                
+                # 停止旧的网络循环（如果存在）
+                if self.client:
+                    try:
+                        self.client.loop_stop()
+                    except Exception as e:
+                        self.logger.debug(f"停止旧循环时出现异常（可忽略）: {e}")
+                
+                # 增加重连延迟（最大60秒）
+                if self.reconnect_delay < 60:
+                    self.reconnect_delay *= 2
+                
+                # 执行重连
+                self._do_reconnect()
+                
+            except Exception as e:
+                self.logger.error(f"重连任务异常: {e}")
+            finally:
+                with self._lock:
+                    self._reconnect_pending = False
+        
+        # 启动重连线程
+        self._reconnect_thread = threading.Thread(target=reconnect_task, daemon=True, name="MQTTReconnect")
+        self._reconnect_thread.start()
+    
+    def _do_reconnect(self):
+        """执行实际的重连操作"""
+        if self._stop_flag:
+            return
+        
+        max_retries = 5
+        for attempt in range(1, max_retries + 1):
+            if self._stop_flag:
+                return
+            
+            self.logger.info(f"正在尝试重连（第 {attempt}/{max_retries} 次）...")
+            
+            try:
+                # 重新初始化客户端（会生成新的密码）
+                self._init_mqtt_client()
+                
+                # 获取连接参数
+                port = self.config["wy_mqtt_port_ssl"] if self.config.get("use_ssl") else self.config["wy_mqtt_port_tcp"]
+                
+                # 尝试连接
+                self.client.connect(self.config["wy_mqtt_broker"], port, keepalive=60)
+                self.client.loop_start()
+                
+                # 等待连接成功
+                start_time = time.time()
+                while not self.connected and (time.time() - start_time) < 15:
+                    if self._stop_flag:
+                        return
+                    time.sleep(0.5)
+                
+                if self.connected:
+                    self.logger.info("MQTT重连成功！")
+                    self.reconnect_delay = 1  # 重置重连延迟
+                    return
+                else:
+                    self.logger.warning(f"重连尝试 {attempt} 未成功，等待下一次尝试...")
+                    
+            except Exception as e:
+                self.logger.error(f"重连尝试 {attempt} 失败: {e}")
+            
+            # 每次重试前等待一段时间
+            if attempt < max_retries:
+                wait_time = min(attempt * 5, 30)
+                for _ in range(wait_time):
+                    if self._stop_flag:
+                        return
+                    time.sleep(1)
+        
+        # 所有重试都失败后，安排下一轮重连
+        if not self._stop_flag:
+            self.logger.warning(f"重连 {max_retries} 次均失败，将继续尝试...")
+            with self._lock:
+                self._reconnect_pending = False
+            self._schedule_reconnect()
     
     def _on_message(self, client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage):
         """接收消息回调函数"""
