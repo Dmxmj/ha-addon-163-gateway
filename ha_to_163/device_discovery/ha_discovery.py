@@ -172,6 +172,12 @@ class HADiscovery(BaseDiscovery):
             if not entity_id.startswith("sensor."):
                 continue  # 只处理传感器实体
             
+            # 【重要】排除单位类实体（如 temperature_unit, tvoc_unit 等）
+            # 这些实体返回的是单位字符串（如 "CelUnit", "PPB"），不是数值
+            if "_unit_" in entity_id or entity_id.endswith("_unit"):
+                self.logger.debug(f"跳过单位实体: {entity_id}")
+                continue
+            
             # 提取实体属性（用于多维度匹配）
             attributes = entity.get("attributes", {})
             device_class = attributes.get("device_class", "").lower()
@@ -185,10 +191,10 @@ class HADiscovery(BaseDiscovery):
                 
                 # 宽松匹配：前缀包含在实体ID中（解决命名偏差）
                 if prefix in entity_id:
-                    # 提取实体类型（如"sensor.hz2_01_temperature" → "temperature"）
-                    entity_type_parts = entity_id.replace(prefix, "").strip('_').split('_')
-                    entity_type = '_'.join(entity_type_parts)
-                    if not entity_type:
+                    # 提取实体类型（如"sensor.hz2_01_temperature_p_3_7" → "temperature_p_3_7"）
+                    entity_suffix = entity_id.replace(f"sensor.{prefix}", "").strip('_')
+                    entity_type_parts = entity_suffix.split('_')
+                    if not entity_suffix:
                         continue
                     
                     # 多维度匹配属性
@@ -199,7 +205,20 @@ class HADiscovery(BaseDiscovery):
                         property_name = PROPERTY_MAPPING[device_class]
                         self.logger.debug(f"通过device_class匹配: {device_class} → {property_name}")
                     
-                    # 方式2：通过实体ID部分匹配
+                    # 方式2：通过组合关键词匹配（如 "relative_humidity", "co2_density"）
+                    if not property_name:
+                        # 尝试匹配多词组合（优先级更高）
+                        for i in range(len(entity_type_parts)):
+                            for j in range(i + 1, min(i + 4, len(entity_type_parts) + 1)):
+                                combo = '_'.join(entity_type_parts[i:j])
+                                if combo in PROPERTY_MAPPING:
+                                    property_name = PROPERTY_MAPPING[combo]
+                                    self.logger.debug(f"通过组合关键词匹配: {combo} → {property_name}")
+                                    break
+                            if property_name:
+                                break
+                    
+                    # 方式3：通过单个实体ID部分匹配
                     if not property_name:
                         for part in entity_type_parts:
                             if part in PROPERTY_MAPPING:
@@ -207,7 +226,7 @@ class HADiscovery(BaseDiscovery):
                                 self.logger.debug(f"通过实体ID部分匹配: {part} → {property_name}")
                                 break
                     
-                    # 方式3：通过friendly_name匹配
+                    # 方式4：通过friendly_name匹配
                     if not property_name:
                         for key in PROPERTY_MAPPING:
                             if key in friendly_name:
