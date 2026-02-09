@@ -207,6 +207,10 @@ class HAto163Gateway:
                         converted_value = round(converted_value, 1)
                     elif prop == "energy":
                         converted_value = round(converted_value, 4)
+                    elif prop == "battery":
+                        converted_value = int(round(converted_value, 0))  # 电量为整数
+                    elif prop == "charging":
+                        converted_value = int(round(converted_value, 0))  # 充电状态为整数
                     
                     payload["params"][prop] = converted_value
                     self.logger.info(
