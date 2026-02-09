@@ -5,28 +5,103 @@ import time
 from typing import Dict
 from .base_discovery import BaseDiscovery
 
-# 扩展属性映射
+# 扩展属性映射（物模型属性名 ← HA实体属性名/关键词）
+# 匹配逻辑：通过实体ID中包含的关键词来映射到物模型属性
 PROPERTY_MAPPING = {
-    # 基础映射
+    # ========== 温度 ==========
     "temperature": "temp",
     "temp": "temp",
     "temp_c": "temp",
     "temp_f": "temp",
+    "temperature_p": "temp",      # sensor.xxx_temperature_p_3_7
+    "temp_p": "temp",
+    
+    # ========== 湿度 ==========
     "humidity": "hum",
     "hum": "hum",
     "humidity_percent": "hum",
-    "battery": "batt",
-    "batt": "batt",
-    "battery_level": "batt",
-    "battery_percent": "batt",
-    
-    # 带后缀的扩展映射
-    "temperature_p": "temp",
-    "temp_p": "temp",
     "humidity_p": "hum",
     "hum_p": "hum",
-    "battery_p": "batt",
-    "batt_p": "batt"
+    "relative_humidity": "hum",   # sensor.xxx_relative_humidity_p_3_1
+    "relative_humidity_p": "hum",
+    
+    # ========== 电量/电池 ==========
+    "battery": "battery",
+    "batt": "battery",
+    "battery_level": "battery",   # sensor.xxx_battery_level_p_4_1
+    "battery_percent": "battery",
+    "battery_p": "battery",
+    "batt_p": "battery",
+    "battery_level_p": "battery",
+    
+    # ========== 充电状态 ==========
+    "charging_state": "charging",  # sensor.xxx_charging_state_p_4_2
+    "charging_state_p": "charging",
+    "charging": "charging",
+    "charge_state": "charging",
+    
+    # ========== 二氧化碳 CO2 ==========
+    "carbon_dioxide": "co2",
+    "co2": "co2",
+    "co2_density": "co2",         # sensor.xxx_co2_density_p_3_8
+    "co2_level": "co2",
+    "carbon_dioxide_p": "co2",
+    "co2_p": "co2",
+    "co2_density_p": "co2",
+    
+    # ========== PM2.5 ==========
+    "pm25": "pm2_5",
+    "pm2_5": "pm2_5",
+    "pm25_density": "pm2_5",
+    "pm2_5_density": "pm2_5",     # sensor.xxx_pm2_5_density_p_3_4
+    "particulate_matter_2_5": "pm2_5",
+    "pm25_p": "pm2_5",
+    "pm2_5_p": "pm2_5",
+    "pm2_5_density_p": "pm2_5",
+    
+    # ========== PM10 ==========
+    "pm10": "pm10",
+    "pm10_density": "pm10",       # sensor.xxx_pm10_density_p_3_5
+    "particulate_matter_10": "pm10",
+    "pm10_p": "pm10",
+    "pm10_density_p": "pm10",
+    
+    # ========== TVOC 挥发性有机物 ==========
+    "tvoc": "tvoc",
+    "volatile_organic_compounds": "tvoc",
+    "voc": "tvoc",
+    "tvoc_density": "tvoc",       # sensor.xxx_tvoc_density_p_3_9
+    "tvoc_p": "tvoc",
+    "voc_p": "tvoc",
+    "tvoc_density_p": "tvoc",
+    
+    # ========== 噪音 ==========
+    "noise": "noise",
+    "sound_level": "noise",
+    "noise_level": "noise",
+    "sound": "noise",
+    "noise_p": "noise",
+    "sound_p": "noise",
+    "noise_decibel": "noise",     # sensor.xxx_noise_decibel_p_10_2
+    "noise_decibel_p": "noise",
+    "decibel": "noise",
+    
+    # ========== 开关状态 ==========
+    "state": "state",
+    "switch": "state",
+    "power": "state",
+    
+    # ========== 电力参数 ==========
+    "voltage": "voltage",
+    "volt": "voltage",
+    "current": "current",
+    "ampere": "current",
+    "power": "active_power",
+    "active_power": "active_power",
+    "energy": "energy",
+    "total_energy": "energy",
+    "frequency": "frequency",
+    "freq": "frequency",
 }
 
 
